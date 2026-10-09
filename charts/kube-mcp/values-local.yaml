@@ -1,0 +1,15 @@
+# Kind on this machine. Hosts use *.localtest.me, a public wildcard that
+# resolves to 127.0.0.1, so no /etc/hosts edits are needed. Kind maps host
+# port 8080 to the ingress controller (see infra/kind/kind.yaml).
+storage:
+  className: standard
+
+ingress:
+  className: nginx
+  dashboardHost: kube-mcp.localtest.me
+  storeHost: store.localtest.me
+  tls:
+    enabled: false
+
+siteUrl: http://store.localtest.me:8080
+publicBaseUrl: http://kube-mcp.localtest.me:8080

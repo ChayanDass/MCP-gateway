@@ -1,0 +1,8 @@
+kube-mcp is installed in {{ .Release.Namespace }}.
+
+Storefront:  {{ .Values.siteUrl }}
+Dashboard:   {{ .Values.publicBaseUrl }}
+MCP gateway: {{ .Values.publicBaseUrl }}/mcp
+
+Admin login: {{ .Values.bootstrapAdminEmail }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.secrets.name }} -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo

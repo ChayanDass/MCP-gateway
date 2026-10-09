@@ -1,0 +1,170 @@
+import { createServer } from "node:http";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
+import { WooClient, WooError } from "./woo.js";
+
+const env = (name: string, fallback?: string): string => {
+  const v = process.env[name] ?? fallback;
+  if (v === undefined) throw new Error(`Missing required env var ${name}`);
+  return v;
+};
+
+const woo = new WooClient({
+  baseUrl: env("WOO_BASE_URL"),
+  homeUrl: env("WOO_HOME_URL"),
+  consumerKey: env("WOO_CONSUMER_KEY"),
+  consumerSecret: env("WOO_CONSUMER_SECRET"),
+  timeoutMs: Number(env("WOO_TIMEOUT_MS", "8000")),
+});
+
+const port = Number(env("PORT", "8080"));
+
+// Build a fresh McpServer per request. The server holds no session state, so
+// any gateway replica can serve any call and the pod can be restarted freely.
+function buildServer(): McpServer {
+  const server = new McpServer({ name: "woocommerce", version: "0.1.0" });
+
+  const ok = (data: unknown) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+  });
+  const fail = (err: unknown) => ({
+    isError: true,
+    content: [{ type: "text" as const, text: err instanceof Error ? err.message : String(err) }],
+  });
+
+  server.registerTool(
+    "list_products",
+    {
+      description: "List products in the WooCommerce store. Optionally filter by name with `search`.",
+      inputSchema: {
+        search: z.string().optional().describe("Substring to match against product names"),
+        per_page: z.number().int().min(1).max(100).optional().describe("Max results, default 20"),
+      },
+    },
+    async ({ search, per_page }) => {
+      try {
+        const products = await woo.listProducts({ search, per_page });
+        return ok(products.map((p) => ({ id: p.id, name: p.name, price: p.price, status: p.status, stock: p.stock_status })));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_product",
+    {
+      description: "Create a new published simple product with a name and regular price.",
+      inputSchema: {
+        name: z.string().min(1).describe("Product name"),
+        regular_price: z.string().regex(/^\d+(\.\d{1,2})?$/).describe("Price as a decimal string, e.g. \"19.99\""),
+        description: z.string().optional(),
+      },
+    },
+    async ({ name, regular_price, description }) => {
+      try {
+        const p = await woo.createProduct({ name, regular_price, description });
+        return ok({ id: p.id, name: p.name, price: p.regular_price, status: p.status, permalink: p.permalink });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_orders",
+    {
+      description:
+        "List orders, newest first. Use `after` (ISO 8601 date-time) to get orders since a point in time, e.g. start of today.",
+      inputSchema: {
+        status: z.enum(["pending", "processing", "on-hold", "completed", "cancelled", "refunded", "failed"]).optional(),
+        after: z.string().optional().describe("ISO 8601 date-time, e.g. 2026-10-09T00:00:00"),
+        per_page: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    async ({ status, after, per_page }) => {
+      try {
+        const orders = await woo.listOrders({ status, after, per_page });
+        return ok(orders.map(summarizeOrder));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_order",
+    {
+      description: "Get full details of one order by its numeric ID, including line items.",
+      inputSchema: { order_id: z.number().int().positive() },
+    },
+    async ({ order_id }) => {
+      try {
+        const o = await woo.getOrder(order_id);
+        return ok({ ...summarizeOrder(o), line_items: o.line_items });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_order_status",
+    {
+      description: "Change the status of an order, e.g. processing, completed, cancelled.",
+      inputSchema: {
+        order_id: z.number().int().positive(),
+        status: z.enum(["pending", "processing", "on-hold", "completed", "cancelled", "refunded", "failed"]),
+      },
+    },
+    async ({ order_id, status }) => {
+      try {
+        const o = await woo.updateOrderStatus(order_id, status);
+        return ok(summarizeOrder(o));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  return server;
+}
+
+function summarizeOrder(o: Awaited<ReturnType<WooClient["getOrder"]>>) {
+  return {
+    id: o.id,
+    number: o.number,
+    status: o.status,
+    date: o.date_created,
+    total: `${o.total} ${o.currency}`,
+    customer: `${o.billing.first_name} ${o.billing.last_name}`.trim(),
+    items: o.line_items.map((i) => `${i.quantity} x ${i.name}`),
+  };
+}
+
+const http = createServer(async (req, res) => {
+  if (req.url === "/healthz" || req.url === "/readyz") {
+    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+    return;
+  }
+  if (req.url !== "/mcp") {
+    res.writeHead(404).end();
+    return;
+  }
+  const server = buildServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  res.on("close", () => {
+    void transport.close();
+    void server.close();
+  });
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res);
+  } catch (e) {
+    console.error("mcp request failed", e instanceof WooError ? e.message : e);
+    if (!res.headersSent) res.writeHead(500).end();
+  }
+});
+
+http.listen(port, () => console.log(`woo-mcp listening on :${port}/mcp`));

@@ -1,0 +1,76 @@
+# Defaults shared by every environment. values-local.yaml and values-prod.yaml
+# override only what differs (hosts, storage class, ingress, sizes, TLS).
+# Nothing secret lives here: credentials are generated into a Secret.
+
+imagePullPolicy: IfNotPresent
+
+images:
+  wordpress: wordpress:7.0.4-php8.3-apache
+  wpCli: wordpress:cli-php8.3
+  mariadb: mariadb:11.4
+  postgres: postgres:16-alpine
+  wooMcp: kube-mcp/woo-mcp:0.1.0
+  gateway: kube-mcp/gateway:0.1.0
+  dashboard: kube-mcp/dashboard:0.1.0
+
+replicas:
+  wooMcp: 1
+  gateway: 1
+  dashboard: 1
+
+# Name of the Secret holding every generated credential (see templates/secrets.yaml).
+secrets:
+  create: true
+  name: kube-mcp-secrets
+
+storage:
+  className: standard
+  mariadbSize: 5Gi
+  wordpressSize: 5Gi
+  postgresSize: 2Gi
+
+ingress:
+  className: nginx
+  controllerNamespace: ingress-nginx
+  dashboardHost: kube-mcp.localtest.me
+  storeHost: store.localtest.me
+  annotations: {}
+  tls:
+    enabled: false
+    dashboardSecret: kube-mcp-dashboard-tls
+    storeSecret: kube-mcp-store-tls
+
+# Public URLs. Overridden per environment.
+siteUrl: http://store.localtest.me:8080
+publicBaseUrl: http://kube-mcp.localtest.me:8080
+
+storeTitle: Demo Store
+storeAdminEmail: admin@example.com
+bootstrapAdminEmail: admin@example.com
+
+
+# Hostnames the gateway may reach even though they fall under a denied pattern.
+upstreamHostAllowlist: []
+
+resources:
+  wordpress:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "1", memory: 768Mi }
+  wpInit:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  mariadb:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+  postgres:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  wooMcp:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+  gateway:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  dashboard:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }

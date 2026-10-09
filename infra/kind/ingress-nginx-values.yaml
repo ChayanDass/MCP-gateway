@@ -1,0 +1,15 @@
+# ingress-nginx for the Kind cluster. Binds the controller to the control-plane
+# node's host ports 8080/8443 (see kind.yaml extraPortMappings).
+controller:
+  ingressClassResource:
+    default: true
+  hostPort:
+    enabled: true
+  service:
+    type: ClusterIP
+  nodeSelector:
+    ingress-ready: "true"
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Equal
+      effect: NoSchedule

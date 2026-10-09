@@ -1,0 +1,70 @@
+import pg from "pg";
+import { config } from "./config.js";
+
+export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+
+// Idempotent schema. A real rollout would use a migration tool; for this
+// project the schema is small and applied at startup.
+export async function migrate(): Promise<void> {
+  // The advisory lock serializes concurrent replicas running migrations at
+  // the same time. It is released when this implicit transaction commits.
+  await pool.query(`
+    SELECT pg_advisory_xact_lock(42);
+    CREATE TABLE IF NOT EXISTS users (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email text UNIQUE NOT NULL,
+      name text NOT NULL,
+      role text NOT NULL CHECK (role IN ('admin', 'member')),
+      password_hash text,
+      disabled boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label text NOT NULL,
+      prefix text NOT NULL,
+      key_hash text UNIQUE NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      revoked_at timestamptz
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at timestamptz NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS mcp_servers (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug text UNIQUE NOT NULL CHECK (slug ~ '^[a-z0-9-]+$'),
+      name text NOT NULL,
+      url text NOT NULL,
+      auth_header text,
+      credential_enc text,
+      enabled boolean NOT NULL DEFAULT true,
+      is_system boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS chat_enabled boolean NOT NULL DEFAULT false;
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id bigserial PRIMARY KEY,
+      ts timestamptz NOT NULL DEFAULT now(),
+      user_id uuid,
+      user_email text NOT NULL,
+      server_slug text NOT NULL,
+      tool text NOT NULL,
+      source text NOT NULL CHECK (source IN ('mcp', 'chat')),
+      duration_ms integer NOT NULL,
+      outcome text NOT NULL,
+      error text
+    );
+    CREATE INDEX IF NOT EXISTS audit_log_ts_idx ON audit_log (ts DESC);
+    CREATE TABLE IF NOT EXISTS llm_settings (
+      id integer PRIMARY KEY CHECK (id = 1),
+      provider text NOT NULL CHECK (provider IN ('openai', 'anthropic')),
+      base_url text NOT NULL,
+      model text NOT NULL,
+      api_key_enc text,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+}

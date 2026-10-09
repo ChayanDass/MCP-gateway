@@ -1,0 +1,24 @@
+.wp-cli.phar
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,43 @@
+# Production-like VPS running k3s. Same charts, different values:
+#   - real domains with TLS from cert-manager (ClusterIssuer "letsencrypt")
+#   - k3s's default storage class (local-path) and ingress class (traefik)
+#   - bigger volumes, and two gateway replicas
+# The LLM key and secrets are created out of band; see README.
+storage:
+  className: local-path
+  mariadbSize: 20Gi
+  wordpressSize: 20Gi
+  postgresSize: 10Gi
+
+ingress:
+  className: traefik
+  controllerNamespace: kube-system
+  dashboardHost: mcp.example.com
+  storeHost: store.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    enabled: true
+    dashboardSecret: mcp-example-com-tls
+    storeSecret: store-example-com-tls
+
+siteUrl: https://store.example.com
+publicBaseUrl: https://mcp.example.com
+storeAdminEmail: ops@example.com
+bootstrapAdminEmail: ops@example.com
+storeTitle: Example Store
+
+replicas:
+  gateway: 2
+
+imagePullPolicy: Always
+
+images:
+  wordpress: wordpress:7.0.4-php8.3-apache
+  wpCli: wordpress:cli-php8.3
+  mariadb: mariadb:11.4
+  postgres: postgres:16-alpine
+  # Pushed to a registry the VPS can pull from.
+  wooMcp: ghcr.io/example/kube-mcp-woo-mcp:0.1.0
+  gateway: ghcr.io/example/kube-mcp-gateway:0.1.0
+  dashboard: ghcr.io/example/kube-mcp-dashboard:0.1.0

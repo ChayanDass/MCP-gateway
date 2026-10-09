@@ -1,0 +1,118 @@
+# Default-deny ingress for the namespace, then explicit allows. Traffic that
+# no policy admits is dropped, so the only paths are the ones listed here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Public entry: the ingress controller reaches the storefront, the gateway and the dashboard.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [wordpress, gateway, dashboard]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingress.controllerNamespace | quote }}
+---
+# Only the gateway can reach the WooCommerce MCP server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: woo-mcp-from-gateway-only
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: woo-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 8080
+---
+# Only the gateway can reach the gateway's own database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-gateway-only
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 5432
+---
+# The store database is reachable only from WordPress and its init Job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb-from-store-only
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mariadb
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: wordpress
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: wp-init
+      ports:
+        - port: 3306
+---
+# WordPress is reached by the ingress controller and by woo-mcp (the REST API)
+# and its own init Job. Nothing else in the namespace can reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wordpress-from-woo-mcp
+  labels:
+    {{- include "kube-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: wordpress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: woo-mcp
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: wp-init
+      ports:
+        - port: 80
