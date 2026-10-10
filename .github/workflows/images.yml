@@ -58,7 +58,10 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # GHCR_TOKEN (optional repo secret, a token with write:packages) is used
+          # when the packages were created outside this repo and the built-in token
+          # has no write access to them. Otherwise the built-in token is used.
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
