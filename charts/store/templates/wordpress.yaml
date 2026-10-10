@@ -1,11 +1,11 @@
-# WordPress keeps its core files and wp-content (plugins, uploads) on a PVC, so
-# a pod restart or upgrade keeps products and media.
+# WordPress keeps its core files, plugins and uploads on a PVC, so a restart
+# keeps products and media.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: wordpress-html
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "wordpress") | nindent 4 }}
+    {{- include "store.labels" . | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: {{ .Values.storage.className | quote }}
@@ -18,10 +18,10 @@ kind: Service
 metadata:
   name: wordpress
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "wordpress") | nindent 4 }}
+    {{- include "store.labels" . | nindent 4 }}
 spec:
   selector:
-    {{- include "kube-mcp.selector" (dict "root" . "component" "wordpress") | nindent 4 }}
+    {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 4 }}
   ports:
     - name: http
       port: 80
@@ -32,7 +32,7 @@ kind: Deployment
 metadata:
   name: wordpress
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "wordpress") | nindent 4 }}
+    {{- include "store.labels" . | nindent 4 }}
 spec:
   replicas: 1
   # The PVC is ReadWriteOnce, so replace the pod rather than run two at once.
@@ -40,11 +40,12 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "kube-mcp.selector" (dict "root" . "component" "wordpress") | nindent 6 }}
+      {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "kube-mcp.componentLabels" (dict "root" . "component" "wordpress") | nindent 8 }}
+        {{- include "store.labels" . | nindent 8 }}
+        {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 8 }}
     spec:
       securityContext:
         fsGroup: 33
@@ -64,13 +65,11 @@ spec:
               value: wordpress
             - name: WORDPRESS_DB_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: mariadb-password } }
-            # Pin the public URL so links and redirects use the storefront host,
-            # not whatever Host header an internal caller (woo-mcp) sends.
+            # Pin the public URL so links and redirects use the store host.
             - name: WORDPRESS_CONFIG_EXTRA
               value: |
                 define('WP_HOME', '{{ .Values.siteUrl }}');
                 define('WP_SITEURL', '{{ .Values.siteUrl }}');
-                if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; }
           readinessProbe:
             httpGet:
               path: /wp-login.php
@@ -85,7 +84,8 @@ spec:
             initialDelaySeconds: 90
             periodSeconds: 20
             failureThreshold: 5
-          {{- include "kube-mcp.resources" .Values.resources.wordpress | nindent 10 }}
+          resources:
+            {{- toYaml .Values.resources.wordpress | nindent 12 }}
           volumeMounts:
             - name: html
               mountPath: /var/www/html

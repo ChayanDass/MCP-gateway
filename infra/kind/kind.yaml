@@ -1,11 +1,19 @@
+# Local Kind cluster for kube-mcp. Maps host ports 80 and 8443 into the ingress
+# controller, and labels the node so the controller can schedule on it.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: kube-mcp
 nodes:
   - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
     extraPortMappings:
       - containerPort: 80
-        hostPort: 8080
+        hostPort: 80
         protocol: TCP
       - containerPort: 443
         hostPort: 8443

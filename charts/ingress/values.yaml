@@ -1,0 +1,11 @@
+# Routing only. The ingress-nginx controller is configured in the stack chart.
+ingress:
+  className: nginx
+  store:
+    host: store.localtest.me
+    service: wordpress
+  dashboard:
+    # The dashboard answers on these hostnames. localhost is needed for Google sign-in.
+    hosts: [localhost, kube-mcp.localtest.me]
+    gatewayService: gateway
+    dashboardService: dashboard

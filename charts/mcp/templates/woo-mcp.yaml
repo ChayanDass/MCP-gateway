@@ -1,14 +1,14 @@
 # WooCommerce MCP server. ClusterIP only, and the NetworkPolicy admits traffic
-# from the gateway alone, so it is not reachable from outside the cluster.
+# from the gateway alone. It reaches the store over the WordPress REST API.
 apiVersion: v1
 kind: Service
 metadata:
   name: woo-mcp
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "woo-mcp") | nindent 4 }}
+    {{- include "mcp.labels" . | nindent 4 }}
 spec:
   selector:
-    {{- include "kube-mcp.selector" (dict "root" . "component" "woo-mcp") | nindent 4 }}
+    {{- include "mcp.selector" (dict "root" . "component" "woo-mcp") | nindent 4 }}
   ports:
     - name: http
       port: 8080
@@ -19,16 +19,17 @@ kind: Deployment
 metadata:
   name: woo-mcp
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "woo-mcp") | nindent 4 }}
+    {{- include "mcp.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas.wooMcp }}
   selector:
     matchLabels:
-      {{- include "kube-mcp.selector" (dict "root" . "component" "woo-mcp") | nindent 6 }}
+      {{- include "mcp.selector" (dict "root" . "component" "woo-mcp") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "kube-mcp.componentLabels" (dict "root" . "component" "woo-mcp") | nindent 8 }}
+        {{- include "mcp.labels" . | nindent 8 }}
+        {{- include "mcp.selector" (dict "root" . "component" "woo-mcp") | nindent 8 }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -41,15 +42,16 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            # The store's WordPress service, in the same namespace.
             - name: WOO_BASE_URL
               value: http://wordpress/wp-json/wc/v3
             # The store's public home URL. OAuth signatures are computed against it.
             - name: WOO_HOME_URL
-              value: {{ .Values.siteUrl | quote }}
+              value: {{ .Values.store.siteUrl | quote }}
             - name: WOO_CONSUMER_KEY
-              valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: woo-consumer-key } }
+              value: {{ required "set woo.consumerKey (see values.yaml)" .Values.woo.consumerKey | quote }}
             - name: WOO_CONSUMER_SECRET
-              valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: woo-consumer-secret } }
+              value: {{ required "set woo.consumerSecret (see values.yaml)" .Values.woo.consumerSecret | quote }}
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 10
@@ -57,7 +59,8 @@ spec:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 10
             periodSeconds: 20
-          {{- include "kube-mcp.resources" .Values.resources.wooMcp | nindent 10 }}
+          resources:
+            {{- toYaml .Values.resources.wooMcp | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

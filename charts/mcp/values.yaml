@@ -1,0 +1,26 @@
+# WooCommerce MCP server (woo-mcp) on its own. It calls the store's WordPress
+# REST API, which needs a WooCommerce consumer key and secret. Install the store
+# first, then create the key in WooCommerce > Settings > Advanced > REST API
+# (user admin, Read/Write) and pass both values at install. The gateway chart
+# is separate and installs after this one.
+
+imagePullPolicy: IfNotPresent
+
+images:
+  wooMcp: kube-mcp/woo-mcp:0.1.0
+
+replicas:
+  wooMcp: 1
+
+store:
+  siteUrl: http://store.localtest.me
+
+# Pass with --set-string woo.consumerKey=ck_... --set-string woo.consumerSecret=cs_...
+woo:
+  consumerKey: ""
+  consumerSecret: ""
+
+resources:
+  wooMcp:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }

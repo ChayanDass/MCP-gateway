@@ -3,10 +3,10 @@ kind: Service
 metadata:
   name: dashboard
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "dashboard") | nindent 4 }}
+    {{- include "mcp.labels" . | nindent 4 }}
 spec:
   selector:
-    {{- include "kube-mcp.selector" (dict "root" . "component" "dashboard") | nindent 4 }}
+    {{- include "mcp.selector" (dict "root" . "component" "dashboard") | nindent 4 }}
   ports:
     - name: http
       port: 8080
@@ -17,16 +17,17 @@ kind: Deployment
 metadata:
   name: dashboard
   labels:
-    {{- include "kube-mcp.componentLabels" (dict "root" . "component" "dashboard") | nindent 4 }}
+    {{- include "mcp.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas.dashboard }}
   selector:
     matchLabels:
-      {{- include "kube-mcp.selector" (dict "root" . "component" "dashboard") | nindent 6 }}
+      {{- include "mcp.selector" (dict "root" . "component" "dashboard") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "kube-mcp.componentLabels" (dict "root" . "component" "dashboard") | nindent 8 }}
+        {{- include "mcp.labels" . | nindent 8 }}
+        {{- include "mcp.selector" (dict "root" . "component" "dashboard") | nindent 8 }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,7 +46,8 @@ spec:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 5
             periodSeconds: 20
-          {{- include "kube-mcp.resources" .Values.resources.dashboard | nindent 10 }}
+          resources:
+            {{- toYaml .Values.resources.dashboard | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

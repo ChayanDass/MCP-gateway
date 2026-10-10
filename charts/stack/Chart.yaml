@@ -1,0 +1,22 @@
+apiVersion: v2
+name: kube-mcp
+description: "Full kube-mcp stack in one release: ingress controller, store, WooCommerce MCP server, gateway with dashboard, and ingress rules."
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: ingress-nginx
+    version: 4.15.1
+    repository: https://kubernetes.github.io/ingress-nginx
+  - name: store
+    version: 0.1.0
+    repository: file://../store
+  - name: mcp
+    version: 0.1.0
+    repository: file://../mcp
+  - name: gateway
+    version: 0.1.0
+    repository: file://../gateway
+  - name: ingress
+    version: 0.1.0
+    repository: file://../ingress

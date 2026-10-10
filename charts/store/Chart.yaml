@@ -1,0 +1,6 @@
+apiVersion: v2
+name: store
+description: WooCommerce store on Kubernetes (WordPress, MariaDB, setup Job, ingress)
+type: application
+version: 0.1.0
+appVersion: "7.0.4"

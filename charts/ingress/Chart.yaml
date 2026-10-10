@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ingress
+description: Ingress rules for the store and the MCP gateway dashboard. The controller itself is installed by the stack chart.
+type: application
+version: 0.1.0

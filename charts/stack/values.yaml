@@ -1,0 +1,35 @@
+# One release for the whole stack. Each key below is passed to the chart of the
+# same name. Values here are the defaults for a local Kind cluster.
+# Secrets go in values-secrets.yaml (git-ignored). See docs/SETUP.md.
+
+ingress-nginx:
+  controller:
+    ingressClassResource:
+      default: true
+    # Binds the controller to the node's host ports (see infra/kind/kind.yaml).
+    hostPort:
+      enabled: true
+    service:
+      type: ClusterIP
+    nodeSelector:
+      ingress-ready: "true"
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Equal
+        effect: NoSchedule
+    admissionWebhooks:
+      # Local Kind only: the webhook's certificate failed to validate here.
+      enabled: false
+
+ingress:
+  className: nginx
+
+store:
+  siteUrl: http://store.localtest.me
+
+mcp:
+  store:
+    siteUrl: http://store.localtest.me
+
+gateway:
+  publicBaseUrl: http://localhost:8080

@@ -1,0 +1,7 @@
+Gateway and dashboard installed.
+
+Dashboard:  http://kube-mcp.localtest.me  (or http://localhost)
+Login:      {{ .Values.bootstrapAdminEmail }}
+Password:   kubectl -n {{ .Release.Namespace }} get secret {{ .Values.secrets.name }} -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d
+
+This chart needs the mcp chart (woo-mcp) installed in the same namespace.

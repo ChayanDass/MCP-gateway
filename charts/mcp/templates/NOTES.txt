@@ -1,0 +1,3 @@
+WooCommerce MCP server installed (ClusterIP only, reachable from the gateway).
+
+Check it:  kubectl -n {{ .Release.Namespace }} get deploy woo-mcp

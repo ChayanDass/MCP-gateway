@@ -1,0 +1,18 @@
+dependencies:
+- name: ingress-nginx
+  repository: https://kubernetes.github.io/ingress-nginx
+  version: 4.15.1
+- name: store
+  repository: file://../store
+  version: 0.1.0
+- name: mcp
+  repository: file://../mcp
+  version: 0.1.0
+- name: gateway
+  repository: file://../gateway
+  version: 0.1.0
+- name: ingress
+  repository: file://../ingress
+  version: 0.1.0
+digest: sha256:212768522b0487651dd810444745efd1c28b3590894479287fe7e8726199761c
+generated: "2026-10-10T23:36:15.484293051+05:30"

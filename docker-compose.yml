@@ -1,0 +1,118 @@
+# WooCommerce store for local testing only. Not used by the Kubernetes deploy.
+#   docker compose up -d
+#   open http://localhost:8081  (admin: http://localhost:8081/wp-admin)
+# Change the passwords below before sharing this machine.
+
+name: kube-mcp-store
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: ${DB_PASSWORD:-wordpress-test}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root-test}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  wordpress:
+    image: wordpress:7.0.4-php8.3-apache
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD:-wordpress-test}
+    ports:
+      - "8081:80"
+    volumes:
+      - wp-html:/var/www/html
+
+  # One-time setup: installs WordPress and WooCommerce, then exits.
+  # Re-running it is safe; each step checks what already exists.
+  setup:
+    image: wordpress:cli-php8.3
+    depends_on:
+      wordpress:
+        condition: service_started
+    user: "33:33"
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD:-wordpress-test}
+      SITE_URL: http://localhost:8081
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-test-123}
+    volumes:
+      - wp-html:/var/www/html
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        W="wp --path=/var/www/html"
+        # The WordPress container writes wp-config.php on its first start.
+        until [ -f /var/www/html/wp-config.php ]; do sleep 3; done
+        until $$W db check >/dev/null 2>&1; do sleep 3; done
+        if ! $$W core is-installed 2>/dev/null; then
+          $$W core install --url="$$SITE_URL" --title="Demo Store" \
+            --admin_user=admin --admin_password="$$ADMIN_PASSWORD" \
+            --admin_email=admin@example.com --skip-email
+        fi
+        # An install made by another run may not have an "admin" user, so create it if missing.
+        if ! $$W user get admin >/dev/null 2>&1; then
+          $$W user create admin admin@example.com --role=administrator --user_pass="$$ADMIN_PASSWORD"
+        fi
+        $$W plugin is-installed woocommerce || $$W plugin install woocommerce --activate
+        $$W plugin is-active woocommerce || $$W plugin activate woocommerce
+        $$W option update woocommerce_coming_soon no
+        $$W option update woocommerce_currency USD
+        $$W option update woocommerce_default_country US:CA
+        # Customers can register and choose their own password on the form.
+        # Email is not available in this container, so WooCommerce must not
+        # generate and email a password.
+        $$W option update users_can_register 1
+        $$W option update default_role customer
+        $$W option update woocommerce_enable_myaccount_registration yes
+        $$W option update woocommerce_registration_generate_password no
+        $$W option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay when your order arrives."}' --format=json
+        $$W option update woocommerce_onboarding_profile '{"skipped":true}' --format=json
+        $$W wc tool run install_pages --user=admin >/dev/null 2>&1 || true
+        # Flat-rate shipping for the default zone, only if the zone has none yet.
+        if ! $$W wc shipping_zone_method list 0 --user=admin --format=json | grep -q flat_rate; then
+          id=$$($$W wc shipping_zone_method create 0 --method_id=flat_rate --enabled=1 --user=admin --porcelain)
+          $$W option update woocommerce_flat_rate_$${id}_settings '{"cost":"5"}' --format=json
+        fi
+        # WooCommerce's sample catalogue (18 products), only on an empty store.
+        if [ "$$($$W post list --post_type=product --format=count)" = "0" ]; then
+          $$W plugin install wordpress-importer --activate
+          $$W import /var/www/html/wp-content/plugins/woocommerce/sample-data/sample_products.xml --authors=create
+        fi
+        # WP-CLI runs without Apache, so it cannot see mod_rewrite and writes an
+        # empty .htaccess. Write the standard WordPress rules ourselves.
+        if ! grep -q "RewriteRule . /index.php" /var/www/html/.htaccess 2>/dev/null; then
+          cat > /var/www/html/.htaccess <<'HTACCESS'
+        # BEGIN WordPress
+        <IfModule mod_rewrite.c>
+        RewriteEngine On
+        RewriteBase /
+        RewriteRule ^index\.php$ - [L]
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule . /index.php [L]
+        </IfModule>
+        # END WordPress
+        HTACCESS
+        fi
+        echo "Setup finished: $$SITE_URL"
+
+volumes:
+  db-data:
+  wp-html:

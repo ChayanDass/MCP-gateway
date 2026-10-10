@@ -1,0 +1,39 @@
+# WooCommerce store on Kubernetes: WordPress, MariaDB, and a one-time setup Job.
+# Settings that differ per environment go in values-local.yaml or values-prod.yaml.
+# Passwords are generated into a Secret on first install and kept on upgrades.
+
+imagePullPolicy: IfNotPresent
+
+images:
+  wordpress: wordpress:7.0.4-php8.3-apache
+  wpCli: wordpress:cli-php8.3
+  mariadb: mariadb:11.4
+
+storage:
+  className: standard
+  mariadbSize: 5Gi
+  wordpressSize: 5Gi
+
+storeTitle: Demo Store
+storeAdminEmail: admin@example.com
+
+# Public address of the store. WordPress uses it for every link and redirect.
+siteUrl: http://store.localtest.me
+
+ingress:
+  className: nginx
+  host: store.localtest.me
+
+secrets:
+  name: store-secrets
+
+resources:
+  wordpress:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "1", memory: 768Mi }
+  mariadb:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+  setup:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }

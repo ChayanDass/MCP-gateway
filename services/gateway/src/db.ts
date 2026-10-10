@@ -45,8 +45,6 @@ export async function migrate(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     );
     ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS chat_enabled boolean NOT NULL DEFAULT false;
-    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
-    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog_at timestamptz;
     ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS auth_mode text NOT NULL DEFAULT 'static' CHECK (auth_mode IN ('static', 'oauth'));
     CREATE TABLE IF NOT EXISTS user_oauth_tokens (
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -151,5 +149,7 @@ export async function migrate(): Promise<void> {
       api_key_enc text,
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog_at timestamptz;
   `);
 }

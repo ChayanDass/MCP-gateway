@@ -1,0 +1,7 @@
+Store installed.
+
+Storefront:  {{ .Values.siteUrl }}
+Admin:       {{ .Values.siteUrl }}/wp-admin  (user: admin)
+Password:    kubectl -n {{ .Release.Namespace }} get secret {{ .Values.secrets.name }} -o jsonpath='{.data.wp-admin-password}' | base64 -d
+
+Check the setup job:  kubectl -n {{ .Release.Namespace }} logs job/store-setup

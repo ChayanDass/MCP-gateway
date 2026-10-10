@@ -28,3 +28,9 @@ coverage/
 *.cookies
 *.cookie.txt
 mcp-check.tmp.mjs
+
+# Local secret values for the mcp chart
+charts/mcp/values-secrets.yaml
+
+# Local secrets for the full stack chart
+charts/stack/values-secrets.yaml
