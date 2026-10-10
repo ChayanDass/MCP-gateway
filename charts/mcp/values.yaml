@@ -15,10 +15,11 @@ replicas:
 store:
   siteUrl: http://store.localtest.me
 
-# Pass with --set-string woo.consumerKey=ck_... --set-string woo.consumerSecret=cs_...
+# WooCommerce REST key, stored in a Secret created outside Helm:
+#   kubectl -n kube-mcp create secret generic woo-mcp-credentials \
+#     --from-literal=consumer-key='ck_...' --from-literal=consumer-secret='cs_...'
 woo:
-  consumerKey: ""
-  consumerSecret: ""
+  existingSecret: woo-mcp-credentials
 
 resources:
   wooMcp:

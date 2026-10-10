@@ -48,10 +48,11 @@ spec:
             # The store's public home URL. OAuth signatures are computed against it.
             - name: WOO_HOME_URL
               value: {{ .Values.store.siteUrl | quote }}
+            # Read from the Secret you create with kubectl (see docs/SETUP.md), never from values.
             - name: WOO_CONSUMER_KEY
-              value: {{ required "set woo.consumerKey (see values.yaml)" .Values.woo.consumerKey | quote }}
+              valueFrom: { secretKeyRef: { name: {{ .Values.woo.existingSecret | quote }}, key: consumer-key } }
             - name: WOO_CONSUMER_SECRET
-              value: {{ required "set woo.consumerSecret (see values.yaml)" .Values.woo.consumerSecret | quote }}
+              valueFrom: { secretKeyRef: { name: {{ .Values.woo.existingSecret | quote }}, key: consumer-secret } }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 10
