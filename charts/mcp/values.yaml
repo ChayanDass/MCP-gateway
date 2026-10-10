@@ -7,7 +7,7 @@
 imagePullPolicy: IfNotPresent
 
 images:
-  wooMcp: kube-mcp/woo-mcp:0.1.0
+  wooMcp: ghcr.io/chayandass/kube-mcp/woo-mcp:0.1.0
 
 replicas:
   wooMcp: 1
