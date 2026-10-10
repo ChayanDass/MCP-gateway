@@ -1,0 +1,87 @@
+# kube-mcp
+
+A team MCP gateway on Kubernetes. It runs a WooCommerce store, a WooCommerce MCP server, a gateway that combines MCP servers behind one endpoint, and a dashboard to manage them.
+
+## What's in the repo
+
+| Path | What it is |
+|---|---|
+| `charts/stack` | The whole stack as one Helm chart. Installs everything below |
+| `charts/store` | WordPress, WooCommerce, MariaDB and the setup Job |
+| `charts/mcp` | The WooCommerce MCP server (`woo-mcp`) |
+| `charts/gateway` | The gateway, the dashboard and Postgres |
+| `charts/ingress` | Ingress rules for the store and dashboard hosts |
+| `services/woo-mcp`, `services/gateway` | Source for the two services |
+| `dashboard` | Source for the dashboard |
+| `infra/kind/kind.yaml` | Local Kind cluster config |
+| `scripts/init.sh` | Runs the whole setup, asking for the values it needs |
+| `docs/SETUP.md` | Full setup guide, with troubleshooting |
+
+## Quick start (local, Kind)
+
+Prerequisites: Docker, `kind`, `kubectl`, `helm` 3. Free ports 80, 8443 and 8080.
+
+```sh
+./scripts/init.sh
+```
+
+The script:
+1. Creates the Kind cluster.
+2. Asks for your Google OAuth client ID, and saves it in a git-ignored file.
+3. Runs one `helm install` for the whole stack.
+4. Waits for the store to finish setting up.
+5. Asks you to create a WooCommerce REST key, then stores it in a Secret.
+6. Starts a small proxy so the dashboard is at http://localhost:8080.
+
+Then open:
+
+- **Store:** http://store.localtest.me
+- **Dashboard:** http://localhost:8080, signing in as `admin@example.com`
+
+For the manual steps, the Google Cloud setup and troubleshooting, see [docs/SETUP.md](docs/SETUP.md).
+
+## Admin passwords
+
+Passwords are generated when the stack is installed. Each one is stored in a Kubernetes Secret, and you read it from there.
+
+**Store (WordPress/WooCommerce) admin, user `admin`:**
+
+```sh
+kubectl -n kube-mcp get secret store-secrets -o jsonpath='{.data.wp-admin-password}' | base64 -d; echo
+```
+
+**Dashboard / gateway admin, `admin@example.com`:**
+
+```sh
+kubectl -n kube-mcp get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo
+```
+
+The Secret keeps the value from install. If you change a password in the app (WordPress: **Users → Profile**), the Secret no longer matches, so the Secret is only a record of the original value.
+
+## Keeping secrets out of git
+
+These files hold local secrets and are git-ignored. Don't commit them:
+
+- `charts/stack/values-secrets.yaml`: the Google client ID and anything else local.
+- `.env`, if you use one.
+
+The WooCommerce REST key is not in any file. It lives in the Kubernetes Secret `woo-mcp-credentials`, which you create with `kubectl`.
+
+## Common tasks
+
+```sh
+# Change a value and apply it
+helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml
+
+# See the state
+kubectl -n kube-mcp get pods
+
+# Remove everything
+helm uninstall kube-mcp -n kube-mcp
+kind delete cluster --name kube-mcp
+docker rm -f kube-mcp-gateway-proxy
+```
+
+## Images
+
+The three MCP images are built by GitHub Actions (`.github/workflows/images.yml`) and published to `ghcr.io/chayandass/kube-mcp/*`. The charts pull them from there, so the cluster doesn't need them built locally.
