@@ -26,6 +26,18 @@ export async function identityFromApiKey(authHeader: string | undefined): Promis
   return rows[0] ?? null;
 }
 
+// Resolves a Bearer token to a member: a gateway API key (kmcp_) or an OAuth access
+// token issued through browser login (kmcpa_).
+export async function identityFromBearer(authHeader: string | undefined): Promise<Identity | null> {
+  const match = authHeader?.match(/^Bearer\s+(kmcp[a]?_[A-Za-z0-9_-]+)$/);
+  if (!match) return null;
+  if (match[1].startsWith("kmcpa_")) {
+    const { identityFromOAuthAccess } = await import("./oauth-server.js");
+    return identityFromOAuthAccess(match[1]);
+  }
+  return identityFromApiKey(authHeader);
+}
+
 // Resolves the dashboard session cookie to a user.
 export async function identityFromSession(req: IncomingMessage): Promise<Identity | null> {
   const token = readCookie(req, SESSION_COOKIE);

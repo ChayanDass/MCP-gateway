@@ -32,10 +32,11 @@ export interface AccessContext {
   grants: Map<string, ServerAccess>; // server id -> level, members only
   overrides: Map<string, ToolOverride>; // `${serverId}|${tool}` -> override
   systemServers: Set<string>; // server ids that are system servers (WooCommerce)
+  userTools: Map<string, "allow" | "deny">; // per-member tool rules: `${serverId}|${tool}`
 }
 
 export async function accessContext(user: Identity): Promise<AccessContext> {
-  const [grantRows, overrideRows, systemRows] = await Promise.all([
+  const [grantRows, overrideRows, systemRows, userToolRows] = await Promise.all([
     user.role === "admin"
       ? Promise.resolve({ rows: [] as { server_id: string; access: ServerAccess }[] })
       : pool.query<{ server_id: string; access: ServerAccess }>(
@@ -46,12 +47,17 @@ export async function accessContext(user: Identity): Promise<AccessContext> {
       `SELECT server_id, tool, access FROM tool_overrides`,
     ),
     pool.query<{ id: string }>(`SELECT id FROM mcp_servers WHERE is_system`),
+    pool.query<{ server_id: string; tool: string; access: "allow" | "deny" }>(
+      `SELECT server_id, tool, access FROM user_tool_access WHERE user_id = $1`,
+      [user.id],
+    ),
   ]);
   return {
     user,
     grants: new Map(grantRows.rows.map((r) => [r.server_id, r.access])),
     overrides: new Map(overrideRows.rows.map((r) => [`${r.server_id}|${r.tool}`, r.access])),
     systemServers: new Set(systemRows.rows.map((r) => r.id)),
+    userTools: new Map(userToolRows.rows.map((r) => [`${r.server_id}|${r.tool}`, r.access])),
   };
 }
 
@@ -65,6 +71,11 @@ export function canCall(ctx: AccessContext, serverId: string, tool: Tool): boole
   if (ctx.user.role === "admin") return true;
   const level = ctx.grants.get(serverId) ?? "none";
   if (level === "none") return false;
+  // Per-member tool rules. Deny always wins; allow grants the tool even when the
+  // server level alone would not (the member still needs access to the server).
+  const rule = ctx.userTools.get(`${serverId}|${tool.name}`);
+  if (rule === "deny") return false;
+  if (rule === "allow") return true;
   if (!ctx.systemServers.has(serverId)) return true;
   if (cls === "read") return true;
   return level === "write";

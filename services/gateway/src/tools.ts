@@ -81,7 +81,7 @@ export async function invokeTool(
   const tool = idx > 0 ? exposedName.slice(idx + SEP.length) : "";
 
   const { rows } = await pool.query<UpstreamRow>(
-    `SELECT id, slug, name, url, auth_header, credential_enc, enabled, is_system, chat_enabled, auth_mode
+    `SELECT id, slug, name, url, auth_header, credential_enc, enabled, is_system, chat_enabled, auth_mode, provider_id
        FROM mcp_servers WHERE slug = $1`,
     [slug],
   );

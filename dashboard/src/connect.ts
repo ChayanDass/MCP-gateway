@@ -81,3 +81,39 @@ export async function copyText(text: string): Promise<boolean> {
   }
   return ok;
 }
+
+// Browser sign-in: the client finds the gateway's login through its metadata,
+// opens the browser, and gets its own token. No key is copied by hand.
+export function oauthSnippetFor(client: ClientId, url = gatewayUrl()): { title: string; body: string; note?: string } {
+  switch (client) {
+    case "claude-code":
+      return {
+        title: "Run in a terminal, then sign in from the browser",
+        body: `claude mcp add --transport http kube-mcp ${url}`,
+        note: "Start Claude Code, run /mcp, and choose kube-mcp to sign in.",
+      };
+    case "cursor":
+      return {
+        title: "Add to ~/.cursor/mcp.json, then sign in when prompted",
+        body: JSON.stringify({ mcpServers: { "kube-mcp": { url } } }, null, 2),
+      };
+    case "vscode":
+      return {
+        title: "Add to .vscode/mcp.json, then sign in when prompted",
+        body: JSON.stringify({ servers: { "kube-mcp": { type: "http", url } } }, null, 2),
+      };
+    case "codex":
+      return {
+        title: "Add to ~/.codex/config.toml, then sign in when prompted",
+        body: `[mcp_servers.kube-mcp]\nurl = "${url}"`,
+      };
+    case "inspector":
+      return {
+        title: "Run the inspector and connect with browser sign-in",
+        body: `npx @modelcontextprotocol/inspector\n\nTransport type: Streamable HTTP\nURL: ${url}`,
+        note: "Connect, then complete the sign-in in the browser window that opens.",
+      };
+    case "other":
+      return { title: "Any MCP client with OAuth support", body: `URL: ${url}` };
+  }
+}

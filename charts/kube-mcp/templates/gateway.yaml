@@ -52,21 +52,6 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: bootstrap-admin-password } }
             - name: WOO_MCP_URL
               value: http://woo-mcp:8080/mcp
-            # GitHub OAuth App for per-member connections. Created out of band:
-            #   kubectl create secret generic github-oauth -n kube-mcp \
-            #     --from-literal=client-id=... --from-literal=client-secret=...
-            - name: GITHUB_OAUTH_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: github-oauth
-                  key: client-id
-                  optional: true
-            - name: GITHUB_OAUTH_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: github-oauth
-                  key: client-secret
-                  optional: true
             - name: GOOGLE_CLIENT_ID
               value: {{ .Values.auth.googleClientId | quote }}
             - name: GOOGLE_ALLOWED_DOMAINS

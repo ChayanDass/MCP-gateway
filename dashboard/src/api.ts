@@ -37,6 +37,7 @@ export interface ServerView {
   authHeader: string | null;
   status: "connected" | "unreachable" | "disabled" | "unknown" | "not_connected" | "reconnect";
   authMode?: "static" | "oauth";
+  providerId?: string | null;
   toolCount?: number;
   error: string | null;
   checkedAt: number;

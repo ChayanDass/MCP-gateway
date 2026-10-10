@@ -18,6 +18,7 @@ export interface UpstreamRow {
   is_system: boolean;
   chat_enabled: boolean;
   auth_mode: "static" | "oauth";
+  provider_id: string | null;
 }
 
 // Who a call is made for. OAuth servers use the member's own token, so each
@@ -66,7 +67,7 @@ export class UpstreamManager {
 
   async loadServers(): Promise<UpstreamRow[]> {
     const { rows } = await pool.query<UpstreamRow>(
-      `SELECT id, slug, name, url, auth_header, credential_enc, enabled, is_system, chat_enabled, auth_mode
+      `SELECT id, slug, name, url, auth_header, credential_enc, enabled, is_system, chat_enabled, auth_mode, provider_id
          FROM mcp_servers ORDER BY is_system DESC, name ASC`,
     );
     return rows;
@@ -131,6 +132,11 @@ export class UpstreamManager {
       if (server.auth_mode === "static") {
         this.tools.set(server.id, result.tools);
         this.statuses.set(server.id, { status: "connected", checkedAt: Date.now(), toolCount: result.tools.length });
+      } else {
+        // Keep the tool names of OAuth servers, so admins can set per-member tool
+        // rules without holding a member's token.
+        const catalog = result.tools.map((t) => ({ name: t.name, description: t.description ?? "", annotations: t.annotations ?? null }));
+        void pool.query(`UPDATE mcp_servers SET tool_catalog = $1::jsonb WHERE id = $2`, [JSON.stringify(catalog), server.id]).catch(() => undefined);
       }
       return { tools: result.tools };
     } catch (e) {

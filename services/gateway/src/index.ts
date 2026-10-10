@@ -3,6 +3,8 @@ import { config } from "./config.js";
 import { hashPassword } from "./crypto.js";
 import { migrate, pool } from "./db.js";
 import { registerApi, serveDashboard } from "./api.js";
+import { registerOAuthRoutes } from "./oauth-server.js";
+import formbody from "@fastify/formbody";
 import { upstreams } from "./upstreams.js";
 
 // Startup is idempotent: schema, the first admin and the WooCommerce system
@@ -50,6 +52,8 @@ async function main(): Promise<void> {
     );
     return payload;
   });
+  await app.register(formbody);
+  registerOAuthRoutes(app);
   registerApi(app);
   app.setNotFoundHandler(async (req, reply) => {
     if (req.url.startsWith("/api/")) return reply.code(404).send({ error: "Not found" });

@@ -16,8 +16,6 @@ export const config = {
   bootstrapAdminPassword: required("BOOTSTRAP_ADMIN_PASSWORD"),
   // URL of the WooCommerce MCP server, registered as the first system server.
   wooMcpUrl: process.env.WOO_MCP_URL ?? "http://woo-mcp:8080/mcp",
-  githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? "",
-  githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? "",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleAllowedDomains: (process.env.GOOGLE_ALLOWED_DOMAINS ?? "")
     .split(",")
@@ -28,7 +26,7 @@ export const config = {
   // Per-call timeout for an upstream tool call.
   upstreamCallTimeoutMs: Number(process.env.UPSTREAM_CALL_TIMEOUT_MS ?? 15000),
   // Timeout for connecting to / listing tools on an upstream.
-  upstreamListTimeoutMs: Number(process.env.UPSTREAM_LIST_TIMEOUT_MS ?? 4000),
+  upstreamListTimeoutMs: Number(process.env.UPSTREAM_LIST_TIMEOUT_MS ?? 15000),
   // How often the background health loop re-lists each enabled upstream.
   healthIntervalMs: Number(process.env.HEALTH_INTERVAL_MS ?? 15000),
   // Extra hostnames allowed for upstreams beyond the default SSRF rules

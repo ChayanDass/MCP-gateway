@@ -10,6 +10,13 @@ const BRANDS: Record<string, { name: string; color: string; mark: string }> = {
   anthropic: { name: "Anthropic", color: "#d97757", mark: "A" },
   custom: { name: "Custom", color: "#64748b", mark: "{}" },
   github: { name: "GitHub", color: "#24292f", mark: "GH" },
+  slack: { name: "Slack", color: "#4a154b", mark: "Sl" },
+  "claude-code": { name: "Claude Code", color: "#d97757", mark: "CC" },
+  cursor: { name: "Cursor", color: "#111111", mark: "Cu" },
+  vscode: { name: "VS Code", color: "#0078d4", mark: "VS" },
+  codex: { name: "OpenAI Codex", color: "#10a37f", mark: "Cx" },
+  inspector: { name: "MCP Inspector", color: "#6d28d9", mark: "In" },
+  other: { name: "Other MCP client", color: "#64748b", mark: "+" },
   woocommerce: { name: "WooCommerce", color: "#7f54b3", mark: "Wc" },
 };
 

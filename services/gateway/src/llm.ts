@@ -30,12 +30,15 @@ export interface ToolCall {
 export interface StepResult {
   text: string;
   toolCalls: ToolCall[];
+  // The model's own assistant message. Some providers (Gemini 3) attach a thought
+  // signature to tool calls and reject the next request if it is not sent back.
+  raw?: Record<string, unknown>;
 }
 
 // Chat history in the OpenAI shape. The Anthropic path converts it on the way out.
 export type Message =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+  | { role: "assistant"; content: string; toolCalls?: ToolCall[]; raw?: Record<string, unknown> }
   | { role: "tool"; toolCallId: string; content: string; isError: boolean };
 
 const CALL_TIMEOUT_MS = 60_000;
@@ -80,6 +83,9 @@ async function openaiStep(cfg: LlmSettings, system: string, messages: Message[],
   for (const m of messages) {
     if (m.role === "tool") {
       msgs.push({ role: "tool", tool_call_id: m.toolCallId, content: m.content });
+    } else if (m.role === "assistant" && m.raw) {
+      // Send back exactly what the model returned, so provider-specific fields survive.
+      msgs.push(m.raw);
     } else if (m.role === "assistant" && m.toolCalls?.length) {
       msgs.push({
         role: "assistant",
@@ -109,7 +115,7 @@ async function openaiStep(cfg: LlmSettings, system: string, messages: Message[],
     name: c.function?.name,
     args: safeJson(c.function?.arguments),
   }));
-  return { text: (msg.content ?? "").trim(), toolCalls };
+  return { text: (msg.content ?? "").trim(), toolCalls, raw: { role: "assistant", ...msg } };
 }
 
 async function anthropicStep(cfg: LlmSettings, system: string, messages: Message[], tools: ToolDef[]): Promise<StepResult> {

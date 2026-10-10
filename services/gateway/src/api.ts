@@ -5,15 +5,16 @@ import { config } from "./config.js";
 import { newToken, hashPassword, sha256, verifyPassword, encrypt } from "./crypto.js";
 import { pool } from "./db.js";
 import { handleMcpRequest } from "./mcp.js";
-import { runChat } from "./chat.js";
+import { ensureConversation, runChat } from "./chat.js";
 import { loadLlm, llmStep } from "./llm.js";
 import { verifyGoogleCredential } from "./google.js";
-import { CATALOG, catalogEntry } from "./catalog.js";
-import { exchangeCode, finishFlow, providerConfigured, startFlow } from "./oauth.js";
+import { issuer } from "./oauth-server.js";
+import { exchangeCode, finishFlow, loadProvider, loadProviderById, providerReady, startFlow, type OAuthProvider } from "./oauth.js";
 import {
   clearSessionCookie,
   createSession,
   deleteSession,
+  identityFromBearer,
   identityFromApiKey,
   identityFromSession,
   sessionCookie,
@@ -22,7 +23,7 @@ import {
 import { upstreams, type UpstreamRow } from "./upstreams.js";
 import { validateUpstreamUrl } from "./ssrf.js";
 import { listExposedTools, oauthTokensFor } from "./tools.js";
-import { effectiveClass, type ToolOverride } from "./access.js";
+import { accessContext, canCall, effectiveClass, type ToolOverride } from "./access.js";
 
 const SLUG_RE = /^[a-z0-9-]{2,40}$/;
 
@@ -72,12 +73,13 @@ async function currentUser(req: FastifyRequest, reply: FastifyReply, adminOnly =
 export function registerApi(app: FastifyInstance): void {
   // ---- MCP endpoint: the single URL external clients use -------------------
   app.all("/mcp", async (req, reply) => {
-    const user = await identityFromApiKey(req.headers.authorization);
+    const user = await identityFromBearer(req.headers.authorization);
     if (!user) {
+      // The MCP authorization spec: point the client at the metadata so it can log in.
       return reply
         .code(401)
-        .header("WWW-Authenticate", 'Bearer realm="kube-mcp"')
-        .send({ error: "Missing or revoked API key" });
+        .header("WWW-Authenticate", `Bearer resource_metadata="${issuer()}/.well-known/oauth-protected-resource"`)
+        .send({ error: "Sign in to the gateway, or send a valid API key" });
     }
     reply.hijack();
     await handleMcpRequest(user, req.raw, reply.raw, req.body);
@@ -184,6 +186,8 @@ export function registerApi(app: FastifyInstance): void {
           enabled: s.enabled,
           chatEnabled: s.chat_enabled,
           isSystem: s.is_system,
+          authMode: s.auth_mode,
+          providerId: s.provider_id,
           hasCredential: Boolean(s.credential_enc),
           authHeader: s.auth_header,
           status: s.enabled ? st.status : "disabled",
@@ -206,17 +210,25 @@ export function registerApi(app: FastifyInstance): void {
     const input = req.body ?? ({} as ServerInput);
     const problem = await validateServerInput(input, true);
     if (problem) return reply.code(400).send({ error: problem });
+    if (input.authMode === "oauth") {
+      if (!input.providerId) return reply.code(400).send({ error: "Choose a sign-in provider" });
+      const { rows } = await pool.query(`SELECT 1 FROM oauth_providers WHERE id = $1`, [input.providerId]);
+      if (!rows[0]) return reply.code(400).send({ error: "That sign-in provider does not exist" });
+    }
+    const oauth = input.authMode === "oauth";
     const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO mcp_servers (slug, name, url, auth_header, credential_enc, enabled, chat_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO mcp_servers (slug, name, url, auth_header, credential_enc, enabled, chat_enabled, auth_mode, provider_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       [
         input.slug,
         input.name,
         validateUpstreamUrl(input.url!),
-        input.authHeader || null,
-        input.credential ? encrypt(input.credential) : null,
+        oauth ? null : input.authHeader || null,
+        !oauth && input.credential ? encrypt(input.credential) : null,
         input.enabled ?? true,
         input.chatEnabled ?? false,
+        oauth ? "oauth" : "static",
+        oauth ? input.providerId : null,
       ],
     );
     void upstreams.refreshAll();
@@ -397,6 +409,47 @@ export function registerApi(app: FastifyInstance): void {
       return reply.code(400).send({ error: "At least one active admin must remain" });
     }
     await pool.query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
+    return { ok: true };
+  });
+
+  // A member's keys and connected clients, for the Members page. Admins see anyone;
+  // members see only themselves.
+  app.get<{ Params: { id: string } }>("/api/users/:id/keys", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
+    const { rows } = await pool.query(
+      `SELECT id, label, prefix, created_at, revoked_at FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.params.id],
+    );
+    return rows;
+  });
+
+  app.get<{ Params: { id: string } }>("/api/users/:id/clients", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
+    // A client counts as connected while it holds an unrevoked, unexpired refresh token.
+    const { rows } = await pool.query(
+      `SELECT c.client_id, c.client_name, min(t.created_at) AS connected_at, max(t.expires_at) AS expires_at
+         FROM oauth_tokens t JOIN oauth_clients c ON c.client_id = t.client_id
+        WHERE t.user_id = $1 AND t.kind = 'refresh' AND t.revoked_at IS NULL AND t.expires_at > now()
+        GROUP BY c.client_id, c.client_name
+        ORDER BY connected_at DESC`,
+      [req.params.id],
+    );
+    return rows;
+  });
+
+  // Disconnect a client: revokes all of that member's tokens for that client.
+  app.delete<{ Params: { id: string; clientId: string } }>("/api/users/:id/clients/:clientId", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
+    await pool.query(
+      `UPDATE oauth_tokens SET revoked_at = now() WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL`,
+      [req.params.id, req.params.clientId],
+    );
     return { ok: true };
   });
 
@@ -591,108 +644,250 @@ export function registerApi(app: FastifyInstance): void {
     };
   });
 
-  // ---- Catalogue of MCP servers ------------------------------------------------
-  app.get("/api/catalog", async (req, reply) => {
-    const user = await currentUser(req, reply);
-    if (!user) return;
-    const { rows: installed } = await pool.query<{ id: string; slug: string; enabled: boolean }>(
-      `SELECT id, slug, enabled FROM mcp_servers`,
-    );
-    const { rows: mine } = await pool.query<{ server_id: string }>(`SELECT server_id FROM user_oauth_tokens WHERE user_id = $1`, [user.id]);
-    const connected = new Set(mine.map((r) => r.server_id));
-    return CATALOG.map((c) => {
-      const row = installed.find((i) => i.slug === c.slug);
-      return {
-        key: c.key,
-        slug: c.slug,
-        name: c.name,
-        description: c.description,
-        url: c.url,
-        authMode: c.authMode,
-        provider: c.provider ?? null,
-        providerReady: c.provider ? providerConfigured(c.provider) : true,
-        installed: Boolean(row),
-        enabled: row?.enabled ?? false,
-        serverId: row?.id ?? null,
-        connected: row ? connected.has(row.id) : false,
-      };
-    });
+  // ---- OAuth providers (admin): any sign-in service, configured in the dashboard ----
+  const providerView = (p: OAuthProvider & { created_at?: string }) => ({
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    authorizeUrl: p.authorize_url,
+    tokenUrl: p.token_url,
+    scopes: p.scopes,
+    scopeParam: p.scope_param,
+    pkce: p.pkce,
+    tokenPath: p.token_path,
+    clientId: p.client_id,
+    hasSecret: Boolean(p.client_secret_enc),
+    redirectUri: `${config.publicBaseUrl.replace(/\/$/, "")}/api/oauth/${p.slug}/callback`,
   });
 
-  app.post<{ Params: { key: string } }>("/api/catalog/:key/install", async (req, reply) => {
+  app.get("/api/oauth-providers", async (req, reply) => {
     if (!(await currentUser(req, reply, true))) return;
-    const entry = catalogEntry(req.params.key);
-    if (!entry) return reply.code(404).send({ error: "Not in the catalogue" });
-    if (entry.provider && !providerConfigured(entry.provider)) {
-      return reply.code(400).send({ error: `${entry.name} sign-in is not configured on the server yet` });
+    const { rows } = await pool.query<OAuthProvider>(`SELECT * FROM oauth_providers ORDER BY name`);
+    return rows.map(providerView);
+  });
+
+  app.post<{ Body: Record<string, string | boolean | undefined> }>("/api/oauth-providers", async (req, reply) => {
+    if (!(await currentUser(req, reply, true))) return;
+    const v = validateProviderInput(req.body ?? {}, true);
+    if (typeof v === "string") return reply.code(400).send({ error: v });
+    try {
+      await pool.query(
+        `INSERT INTO oauth_providers (slug, name, authorize_url, token_url, scopes, scope_param, pkce, token_path, client_id, client_secret_enc)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [v.slug, v.name, v.authorizeUrl, v.tokenUrl, v.scopes, v.scopeParam, v.pkce, v.tokenPath, v.clientId, encrypt(v.clientSecret)],
+      );
+    } catch (e) {
+      if (String(e).includes("duplicate key")) return reply.code(409).send({ error: "A provider with that slug already exists" });
+      throw e;
     }
-    await pool.query(
-      `INSERT INTO mcp_servers (slug, name, url, enabled, is_system, chat_enabled, auth_mode)
-       VALUES ($1, $2, $3, true, $4, false, $5)
-       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, url = EXCLUDED.url, auth_mode = EXCLUDED.auth_mode, credential_enc = NULL, auth_header = NULL`,
-      [entry.slug, entry.name, entry.url, entry.system ?? false, entry.authMode],
-    );
-    upstreams.invalidate((await pool.query<{ id: string }>(`SELECT id FROM mcp_servers WHERE slug = $1`, [entry.slug])).rows[0].id);
     return reply.code(201).send({ ok: true });
   });
 
-  // ---- Per-member OAuth connections ---------------------------------------------
-  // Start: the member clicks Connect and is sent to the provider.
-  app.get<{ Params: { provider: string } }>("/api/oauth/:provider/start", async (req, reply) => {
-    const user = await currentUser(req, reply);
-    if (!user) return;
-    if (req.params.provider !== "github" || !providerConfigured("github")) {
-      return reply.code(400).send({ error: "This sign-in is not configured" });
-    }
-    return reply.redirect(startFlow("github", user.id));
+  app.put<{ Params: { slug: string }; Body: Record<string, string | boolean | undefined> }>("/api/oauth-providers/:slug", async (req, reply) => {
+    if (!(await currentUser(req, reply, true))) return;
+    const existing = await loadProvider(req.params.slug);
+    if (!existing) return reply.code(404).send({ error: "Provider not found" });
+    const v = validateProviderInput({ ...req.body, slug: existing.slug }, false);
+    if (typeof v === "string") return reply.code(400).send({ error: v });
+    await pool.query(
+      `UPDATE oauth_providers SET name = $2, authorize_url = $3, token_url = $4, scopes = $5, scope_param = $6, pkce = $7, token_path = $8, client_id = $9,
+              client_secret_enc = COALESCE($10, client_secret_enc) WHERE slug = $1`,
+      [existing.slug, v.name, v.authorizeUrl, v.tokenUrl, v.scopes, v.scopeParam, v.pkce, v.tokenPath, v.clientId, v.clientSecret ? encrypt(v.clientSecret) : null],
+    );
+    return { ok: true };
   });
 
-  // Callback: the provider sends the member back with a code. The state was
-  // issued to this member only, and can be used once.
+  app.delete<{ Params: { slug: string } }>("/api/oauth-providers/:slug", async (req, reply) => {
+    if (!(await currentUser(req, reply, true))) return;
+    const { rowCount } = await pool.query(`DELETE FROM oauth_providers WHERE slug = $1`, [req.params.slug]);
+    if (!rowCount) return reply.code(404).send({ error: "Provider not found" });
+    return { ok: true };
+  });
+
+  // ---- Per-member OAuth connections to an MCP server ------------------------------
+  // Start: the member clicks Connect on a server that uses a provider.
+  app.get<{ Params: { id: string } }>("/api/oauth/server/:id/start", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const { rows } = await pool.query<{ provider_id: string | null; auth_mode: string; enabled: boolean }>(
+      `SELECT provider_id, auth_mode, enabled FROM mcp_servers WHERE id = $1`,
+      [req.params.id],
+    );
+    const server = rows[0];
+    if (!server || server.auth_mode !== "oauth" || !server.provider_id || !server.enabled) {
+      return reply.code(400).send({ error: "This server does not use browser sign-in" });
+    }
+    const provider = await loadProviderById(server.provider_id);
+    if (!provider || !providerReady(provider)) return reply.code(400).send({ error: `${provider?.name ?? "This provider"} is not configured yet` });
+    return reply.redirect(startFlow(provider, user.id, req.params.id));
+  });
+
+  // Callback: the provider sends the member back with a code. The state was issued
+  // to this member for this server, and can be used once.
   app.get<{ Params: { provider: string }; Querystring: { code?: string; state?: string; error?: string } }>(
     "/api/oauth/:provider/callback",
     async (req, reply) => {
       const back = (q: string) => reply.redirect(`/#/servers?${q}`);
-      if (req.params.provider !== "github") return back("oauth=failed&reason=unknown_provider");
       if (req.query.error) return back("oauth=failed&reason=denied");
-      const flow = req.query.state ? finishFlow("github", req.query.state) : null;
+      const flow = req.query.state ? finishFlow(req.params.provider, req.query.state) : null;
       if (!flow || !req.query.code) return back("oauth=failed&reason=expired");
+      const provider = await loadProvider(req.params.provider);
+      if (!provider) return back("oauth=failed&reason=unknown_provider");
       try {
-        const token = await exchangeCode("github", req.query.code, flow.verifier);
-        const { rows } = await pool.query<{ id: string }>(`SELECT id FROM mcp_servers WHERE slug = 'github' AND auth_mode = 'oauth'`);
-        if (!rows[0]) return back("oauth=failed&reason=not_installed");
+        const token = await exchangeCode(provider, req.query.code, flow.verifier);
         await pool.query(
           `INSERT INTO user_oauth_tokens (user_id, server_id, access_enc, scope, connected_at)
            VALUES ($1, $2, $3, $4, now())
            ON CONFLICT (user_id, server_id) DO UPDATE SET access_enc = $3, scope = $4, connected_at = now()`,
-          [flow.userId, rows[0].id, encrypt(token.accessToken), token.scope],
+          [flow.userId, flow.serverId, encrypt(token.accessToken), token.scope],
         );
-        return back("oauth=connected&provider=github");
+        return back(`oauth=connected&server=${flow.serverId}`);
       } catch (e) {
-        req.log.warn({ err: e instanceof Error ? e.message : e }, "github oauth exchange failed");
+        req.log.warn({ err: e instanceof Error ? e.message : e, provider: provider.slug }, "oauth exchange failed");
         return back("oauth=failed&reason=exchange");
       }
     },
   );
 
-  app.delete<{ Params: { provider: string } }>("/api/oauth/:provider", async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/api/oauth/server/:id", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
-    await pool.query(
-      `DELETE FROM user_oauth_tokens WHERE user_id = $1 AND server_id IN (SELECT id FROM mcp_servers WHERE slug = $2)`,
-      [user.id, req.params.provider],
-    );
+    await pool.query(`DELETE FROM user_oauth_tokens WHERE user_id = $1 AND server_id = $2`, [user.id, req.params.id]);
     return { ok: true };
   });
 
-  // ---- Chat -----------------------------------------------------------------
+  // ---- Per-member tool permissions ----------------------------------------------
+  // For each enabled server: its tools, and this member's rule for each (inherit,
+  // allow or deny) with the result. Static servers list live; OAuth servers use the
+  // tool names recorded the last time someone connected to them.
+  app.get<{ Params: { id: string } }>("/api/users/:id/tool-access", async (req, reply) => {
+    if (!(await currentUser(req, reply, true))) return;
+    const { rows: urows } = await pool.query<Identity>(`SELECT id, email, name, role FROM users WHERE id = $1`, [req.params.id]);
+    if (!urows[0]) return reply.code(404).send({ error: "User not found" });
+    const ctx = await accessContext(urows[0]);
+    const servers = (await upstreams.loadServers()).filter((s) => s.enabled);
+    const overrides = await loadOverrides();
+    const out = [];
+    for (const s of servers) {
+      let tools: { name: string; description?: string; annotations?: unknown }[];
+      if (s.auth_mode === "oauth") {
+        const { rows } = await pool.query<{ tool_catalog: { name: string; description: string; annotations: unknown }[] }>(
+          `SELECT tool_catalog FROM mcp_servers WHERE id = $1`,
+          [s.id],
+        );
+        tools = rows[0]?.tool_catalog ?? [];
+      } else {
+        tools = await upstreams.toolsFor(s);
+      }
+      out.push({
+        serverId: s.id,
+        slug: s.slug,
+        name: s.name,
+        authMode: s.auth_mode,
+        isSystem: s.is_system,
+        level: ctx.grants.get(s.id) ?? "none",
+        tools: tools.map((t) => {
+          const rule = ctx.userTools.get(`${s.id}|${t.name}`) ?? "inherit";
+          const allowed = canCall(ctx, s.id, t as never);
+          return {
+            name: t.name,
+            description: (t.description as string) ?? "",
+            class: effectiveClass(t as never, overrides.get(`${s.id}|${t.name}`)),
+            rule,
+            allowed,
+          };
+        }),
+      });
+    }
+    return out;
+  });
+
+  app.put<{ Params: { id: string }; Body: { serverId?: string; tool?: string; access?: string } }>("/api/users/:id/tool-access", async (req, reply) => {
+    if (!(await currentUser(req, reply, true))) return;
+    const { serverId = "", tool = "", access = "inherit" } = req.body ?? {};
+    if (!serverId || !tool) return reply.code(400).send({ error: "Server and tool are required" });
+    if (!["inherit", "allow", "deny"].includes(access)) return reply.code(400).send({ error: "Access must be inherit, allow or deny" });
+    if (access === "inherit") {
+      await pool.query(`DELETE FROM user_tool_access WHERE user_id = $1 AND server_id = $2 AND tool = $3`, [req.params.id, serverId, tool]);
+    } else {
+      await pool.query(
+        `INSERT INTO user_tool_access (user_id, server_id, tool, access) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, server_id, tool) DO UPDATE SET access = $4`,
+        [req.params.id, serverId, tool, access],
+      );
+    }
+    return { ok: true };
+  });
+
+  // ---- Chat: saved conversations, one member's own ----------------------------------
+  app.get("/api/chat/conversations", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const { rows } = await pool.query(
+      `SELECT c.id, c.title, c.created_at, c.updated_at,
+              (SELECT count(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
+         FROM chat_conversations c WHERE c.user_id = $1 ORDER BY c.updated_at DESC LIMIT 200`,
+      [user.id],
+    );
+    return rows;
+  });
+
+  app.post("/api/chat/conversations", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const id = await ensureConversation(user, null, "");
+    return reply.code(201).send({ id });
+  });
+
+  app.get<{ Params: { id: string } }>("/api/chat/conversations/:id", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const { rows: conv } = await pool.query(`SELECT id, title, created_at FROM chat_conversations WHERE id = $1 AND user_id = $2`, [req.params.id, user.id]);
+    if (!conv[0]) return reply.code(404).send({ error: "Conversation not found" });
+    const { rows } = await pool.query(
+      `SELECT id, role, content, meta, created_at FROM chat_messages WHERE conversation_id = $1 ORDER BY id`,
+      [req.params.id],
+    );
+    // Internal fields (raw provider messages, tool results sent to the model) stay on the server.
+    const messages = rows.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.created_at,
+      model: (m.meta as { model?: string }).model ?? null,
+      toolCalls: ((m.meta as { toolPreview?: unknown[] }).toolPreview ?? []) as unknown[],
+    }));
+    return { id: conv[0].id, title: conv[0].title, messages };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/chat/conversations/:id", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const { rowCount } = await pool.query(`DELETE FROM chat_conversations WHERE id = $1 AND user_id = $2`, [req.params.id, user.id]);
+    if (!rowCount) return reply.code(404).send({ error: "Conversation not found" });
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string }; Body: { message?: string } }>("/api/chat/conversations/:id/messages", async (req, reply) => {
+    const user = await currentUser(req, reply);
+    if (!user) return;
+    const message = (req.body?.message ?? "").trim();
+    if (!message) return reply.code(400).send({ error: "Message is required" });
+    try {
+      return await runChat(user, req.params.id, message);
+    } catch (e) {
+      return reply.code(502).send({ error: e instanceof Error ? e.message : "Chat failed" });
+    }
+  });
+
+  // Starts a new conversation with the first message.
   app.post<{ Body: { message?: string } }>("/api/chat", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
     const message = (req.body?.message ?? "").trim();
     if (!message) return reply.code(400).send({ error: "Message is required" });
     try {
-      return await runChat(user, message);
+      return await runChat(user, null, message);
     } catch (e) {
       return reply.code(502).send({ error: e instanceof Error ? e.message : "Chat failed" });
     }
@@ -725,6 +920,7 @@ function serverView(
     chatEnabled: s.chat_enabled,
     isSystem: s.is_system,
     authMode: s.auth_mode,
+    providerId: s.provider_id,
     hasCredential: Boolean(s.credential_enc),
     authHeader: s.auth_header,
     status,
@@ -751,6 +947,8 @@ async function otherActiveAdminExists(excludeId: string): Promise<boolean> {
 }
 
 interface ServerInput {
+  authMode?: string;
+  providerId?: string;
   chatEnabled?: boolean;
   slug?: string;
   name?: string;
@@ -758,6 +956,48 @@ interface ServerInput {
   authHeader?: string;
   credential?: string;
   enabled?: boolean;
+}
+
+// Checks one provider's settings. Returns the cleaned values, or an error message.
+function validateProviderInput(
+  b: Record<string, string | boolean | undefined>,
+  creating: boolean,
+):
+  | { slug: string; name: string; authorizeUrl: string; tokenUrl: string; scopes: string; scopeParam: string; pkce: boolean; tokenPath: string; clientId: string; clientSecret: string }
+  | string {
+  const str = (k: string) => (typeof b[k] === "string" ? (b[k] as string).trim() : "");
+  const slug = str("slug").toLowerCase();
+  if (creating && !/^[a-z0-9-]{2,40}$/.test(slug)) return "Slug must be 2-40 characters: lowercase letters, digits, hyphens";
+  const name = str("name");
+  if (!name) return "Name is required";
+  const authorizeUrl = str("authorizeUrl");
+  const tokenUrl = str("tokenUrl");
+  for (const u of [authorizeUrl, tokenUrl]) {
+    try {
+      const parsed = new URL(u);
+      if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && parsed.hostname === "localhost")) return "Sign-in URLs must use https";
+    } catch {
+      return "Sign-in URLs must be valid addresses";
+    }
+  }
+  const clientId = str("clientId");
+  if (creating && !clientId) return "Client ID is required";
+  const clientSecret = str("clientSecret");
+  if (creating && !clientSecret) return "Client secret is required";
+  const scopeParam = str("scopeParam") || "scope";
+  if (!["scope", "user_scope"].includes(scopeParam)) return "Scope parameter must be scope or user_scope";
+  return {
+    slug,
+    name,
+    authorizeUrl,
+    tokenUrl,
+    scopes: str("scopes"),
+    scopeParam,
+    pkce: b.pkce === true || b.pkce === "true",
+    tokenPath: str("tokenPath") || "access_token",
+    clientId,
+    clientSecret,
+  };
 }
 
 async function validateServerInput(input: ServerInput, creating: boolean): Promise<string | null> {

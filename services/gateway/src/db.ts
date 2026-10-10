@@ -56,6 +56,68 @@ export async function migrate(): Promise<void> {
       connected_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, server_id)
     );
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id text PRIMARY KEY,
+      client_name text NOT NULL,
+      redirect_uris jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash text PRIMARY KEY,
+      client_id text NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      redirect_uri text NOT NULL,
+      code_challenge text NOT NULL,
+      expires_at timestamptz NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash text PRIMARY KEY,
+      kind text NOT NULL CHECK (kind IN ('access', 'refresh')),
+      client_id text NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at timestamptz NOT NULL,
+      revoked_at timestamptz
+    );
+    ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS tool_catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
+    CREATE TABLE IF NOT EXISTS user_tool_access (
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+      tool text NOT NULL,
+      access text NOT NULL CHECK (access IN ('allow', 'deny')),
+      PRIMARY KEY (user_id, server_id, tool)
+    );
+    CREATE TABLE IF NOT EXISTS oauth_providers (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug text UNIQUE NOT NULL CHECK (slug ~ '^[a-z0-9-]{2,40}$'),
+      name text NOT NULL,
+      authorize_url text NOT NULL,
+      token_url text NOT NULL,
+      scopes text NOT NULL DEFAULT '',
+      scope_param text NOT NULL DEFAULT 'scope',
+      pkce boolean NOT NULL DEFAULT true,
+      token_path text NOT NULL DEFAULT 'access_token',
+      client_id text NOT NULL DEFAULT '',
+      client_secret_enc text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS provider_id uuid REFERENCES oauth_providers(id) ON DELETE SET NULL;
+    CREATE TABLE IF NOT EXISTS chat_conversations (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title text NOT NULL DEFAULT 'New chat',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id bigserial PRIMARY KEY,
+      conversation_id uuid NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+      role text NOT NULL CHECK (role IN ('user', 'assistant')),
+      content text NOT NULL DEFAULT '',
+      meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS chat_messages_conv_idx ON chat_messages (conversation_id, id);
     CREATE TABLE IF NOT EXISTS user_server_access (
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
