@@ -34,3 +34,6 @@ charts/mcp/values-secrets.yaml
 
 # Local secrets for the full stack chart
 charts/stack/values-secrets.yaml
+
+# Packaged subcharts are rebuilt with `helm dependency build`, never committed
+charts/*/charts/*.tgz

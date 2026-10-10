@@ -1,0 +1,2 @@
+# Never package local secrets into a chart
+values-secrets.yaml
