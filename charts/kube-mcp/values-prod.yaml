@@ -12,7 +12,7 @@ storage:
 ingress:
   className: traefik
   controllerNamespace: kube-system
-  dashboardHost: mcp.example.com
+  dashboardHosts: [mcp.example.com]
   storeHost: store.example.com
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt

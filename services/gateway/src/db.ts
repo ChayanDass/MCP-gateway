@@ -45,6 +45,29 @@ export async function migrate(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     );
     ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS chat_enabled boolean NOT NULL DEFAULT false;
+    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog_at timestamptz;
+    ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS auth_mode text NOT NULL DEFAULT 'static' CHECK (auth_mode IN ('static', 'oauth'));
+    CREATE TABLE IF NOT EXISTS user_oauth_tokens (
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+      access_enc text NOT NULL,
+      scope text NOT NULL DEFAULT '',
+      connected_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, server_id)
+    );
+    CREATE TABLE IF NOT EXISTS user_server_access (
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+      access text NOT NULL CHECK (access IN ('read', 'write')),
+      PRIMARY KEY (user_id, server_id)
+    );
+    CREATE TABLE IF NOT EXISTS tool_overrides (
+      server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+      tool text NOT NULL,
+      access text NOT NULL CHECK (access IN ('read', 'write', 'blocked')),
+      PRIMARY KEY (server_id, tool)
+    );
     CREATE TABLE IF NOT EXISTS audit_log (
       id bigserial PRIMARY KEY,
       ts timestamptz NOT NULL DEFAULT now(),

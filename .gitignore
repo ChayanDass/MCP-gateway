@@ -22,3 +22,9 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Local test artifacts: cookie jars, session files and ad-hoc scratch files
+*.jar
+*.cookies
+*.cookie.txt
+mcp-check.tmp.mjs

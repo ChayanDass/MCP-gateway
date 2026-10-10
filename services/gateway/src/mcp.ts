@@ -21,7 +21,7 @@ export async function handleMcpRequest(
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = await listExposedTools();
+    const tools = await listExposedTools(user);
     return {
       tools: tools.map((t) => ({
         name: t.name,

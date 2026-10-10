@@ -26,7 +26,7 @@ export async function runChat(user: Identity, message: string): Promise<ChatResu
   const cfg = await loadLlm();
   if (!cfg) throw new Error("No model is configured. An admin can set one under Model in the dashboard.");
 
-  const exposed = await listExposedTools({ forChat: true });
+  const exposed = await listExposedTools(user, { forChat: true });
   const tools: ToolDef[] = exposed.map((t) => {
     const { $schema: _ignored, ...schema } = (t.inputSchema ?? { type: "object" }) as Record<string, unknown>;
     return { name: t.name, description: t.description ?? "", inputSchema: { type: "object", ...schema } };

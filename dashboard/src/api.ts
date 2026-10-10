@@ -35,10 +35,12 @@ export interface ServerView {
   isSystem: boolean;
   hasCredential: boolean;
   authHeader: string | null;
-  status: "connected" | "unreachable" | "disabled" | "unknown";
+  status: "connected" | "unreachable" | "disabled" | "unknown" | "not_connected" | "reconnect";
+  authMode?: "static" | "oauth";
+  toolCount?: number;
   error: string | null;
   checkedAt: number;
-  tools: { name: string; description: string }[];
+  tools: { name: string; description: string; class: "read" | "write" | "blocked"; override: "auto" | "read" | "write" | "blocked" }[];
 }
 
 export interface UserView {

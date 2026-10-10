@@ -1,22 +1,27 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type KeyView, type Me, type UserView } from "./api";
+import { api, type KeyView, type Me, type ServerView, type UserView } from "./api";
+import { UserEditor } from "./UserEditor";
+import { ConnectSnippet } from "./ConnectSnippet";
+import { navigate } from "./router";
 
-// The command a member pastes into Claude Code. Only the gateway URL and the
-// member's own key are in it; no upstream credentials.
-function connectCommand(key: string): string {
-  return `claude mcp add --transport http kube-mcp ${window.location.origin}/mcp --header "Authorization: Bearer ${key}"`;
-}
-
-export function MembersPage({ me }: { me: Me }) {
+export function MembersPage({ me, route }: { me: Me; route: string[] }) {
   const isAdmin = me.role === "admin";
   const [users, setUsers] = useState<UserView[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [newKey, setNewKey] = useState<{ user: string; key: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ email: "", name: "", role: "member", password: "" });
+  const [servers, setServers] = useState<ServerView[]>([]);
+  const [grants, setGrants] = useState<Record<string, "none" | "read" | "write">>({});
+  // The member being edited lives in the URL: #/members/<id>.
+  const editing = route[1] ?? null;
+  const setEditing = (id: string | null) => navigate(id ? `members/${id}` : "members");
 
   const reload = () => {
-    if (isAdmin) api<UserView[]>("GET", "/api/users").then(setUsers).catch((e) => setError(e.message));
+    if (isAdmin) {
+      api<UserView[]>("GET", "/api/users").then(setUsers).catch((e) => setError(e.message));
+      api<ServerView[]>("GET", "/api/servers").then(setServers).catch((e) => setError(e.message));
+    }
     api<KeyView[]>("GET", "/api/keys").then(setKeys).catch((e) => setError(e.message));
   };
   useEffect(reload, [isAdmin]);
@@ -33,8 +38,9 @@ export function MembersPage({ me }: { me: Me }) {
 
   async function createUser(e: FormEvent) {
     e.preventDefault();
-    await run(() => api("POST", "/api/users", form));
+    await run(() => api("POST", "/api/users", { ...form, access: grants }));
     setForm({ email: "", name: "", role: "member", password: "" });
+    setGrants({});
   }
 
   async function issue(userId: string, label: string, forUser?: string) {
@@ -55,10 +61,8 @@ export function MembersPage({ me }: { me: Me }) {
           <strong>New API key for {newKey.user}</strong>
           <p className="small">Copy it now. It is shown once and only its hash is stored.</p>
           <code className="keybox">{newKey.key}</code>
-          <p className="small">Connect Claude Code with this command:</p>
-          <pre>{connectCommand(newKey.key)}</pre>
+          <ConnectSnippet apiKey={newKey.key} />
           <div className="row">
-            <button onClick={() => navigator.clipboard?.writeText(connectCommand(newKey.key))}>Copy command</button>
             <button onClick={() => setNewKey(null)}>Done</button>
           </div>
         </div>
@@ -67,7 +71,7 @@ export function MembersPage({ me }: { me: Me }) {
 
       {isAdmin && (
         <>
-          <h2>Members</h2>
+          <h3 className="section">Members</h3>
           <table>
             <thead>
               <tr>
@@ -88,6 +92,7 @@ export function MembersPage({ me }: { me: Me }) {
                   <td>{u.active_keys}</td>
                   <td>{u.disabled ? "Disabled" : "Active"}</td>
                   <td className="row">
+                    <button onClick={() => setEditing(editing === u.id ? null : u.id)}>{editing === u.id ? "Close" : "Edit"}</button>
                     <button onClick={() => issue(u.id, "dashboard", u.email)}>Issue key</button>
                     {u.id !== me.id && (
                       <button onClick={() => run(() => api("PATCH", `/api/users/${u.id}`, { disabled: !u.disabled }))}>
@@ -99,6 +104,15 @@ export function MembersPage({ me }: { me: Me }) {
               ))}
             </tbody>
           </table>
+          {editing && users.find((u) => u.id === editing) && (
+            <UserEditor
+              key={editing}
+              user={users.find((u) => u.id === editing)!}
+              isSelf={editing === me.id}
+              onChanged={reload}
+              onClose={() => setEditing(null)}
+            />
+          )}
           <form className="card" onSubmit={createUser}>
             <h3>Invite member</h3>
             <div className="grid">
@@ -122,13 +136,40 @@ export function MembersPage({ me }: { me: Me }) {
                 <input type="password" minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
               </label>
             </div>
+            {form.role === "member" && (
+              <>
+                <h4>Access per server</h4>
+                <div className="grid">
+                  {servers.map((sv) =>
+                    sv.isSystem ? (
+                      <label key={sv.id}>
+                        {sv.name} <code>{sv.slug}</code>
+                        <select value={grants[sv.id] ?? "none"} onChange={(e) => setGrants({ ...grants, [sv.id]: e.target.value as "none" | "read" | "write" })}>
+                          <option value="none">No access</option>
+                          <option value="read">Read only</option>
+                          <option value="write">Read and write</option>
+                        </select>
+                      </label>
+                    ) : (
+                      <label key={sv.id} className="row check">
+                        <input
+                          type="checkbox"
+                          checked={(grants[sv.id] ?? "none") !== "none"}
+                          onChange={(e) => setGrants({ ...grants, [sv.id]: e.target.checked ? "write" : "none" })}
+                        />
+                        {sv.name} <code>{sv.slug}</code> <span className="badge">third-party</span>
+                      </label>
+                    ),
+                  )}
+                </div>
+              </>
+            )}
             <button type="submit">Create user</button>
           </form>
         </>
       )}
 
-      <h2>My API keys</h2>
-      <p className="muted">Use a key as a Bearer token with the gateway URL. Keys are shown once at creation.</p>
+      <h3 className="section">My API keys</h3>
       <button onClick={() => issue(me.id, "my key")}>Generate new key</button>
       <table>
         <thead>

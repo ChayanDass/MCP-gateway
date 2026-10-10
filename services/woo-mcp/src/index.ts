@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -143,28 +143,31 @@ function summarizeOrder(o: Awaited<ReturnType<WooClient["getOrder"]>>) {
   };
 }
 
-const http = createServer(async (req, res) => {
-  if (req.url === "/healthz" || req.url === "/readyz") {
-    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
-    return;
-  }
-  if (req.url !== "/mcp") {
-    res.writeHead(404).end();
-    return;
-  }
+const app = express();
+app.disable("x-powered-by");
+app.use(express.json({ limit: "1mb" }));
+
+app.get(["/healthz", "/readyz"], (_req: Request, res: Response) => {
+  res.type("text/plain").send("ok");
+});
+
+// Stateless MCP endpoint: a fresh server and transport per request, so any
+// replica can answer and a restart loses no session.
+app.all("/mcp", async (req: Request, res: Response) => {
   const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
     void transport.close();
     void server.close();
   });
-  try {
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
-  } catch (e) {
-    console.error("mcp request failed", e instanceof WooError ? e.message : e);
-    if (!res.headersSent) res.writeHead(500).end();
-  }
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
 });
 
-http.listen(port, () => console.log(`woo-mcp listening on :${port}/mcp`));
+// Last-resort error handler, so a failed request never leaves a socket hanging.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("mcp request failed", err instanceof WooError ? err.message : err);
+  if (!res.headersSent) res.status(500).json({ error: "internal error" });
+});
+
+app.listen(port, () => console.log(`woo-mcp listening on :${port}/mcp`));

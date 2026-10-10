@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "./api";
+import { Logo } from "./Logo";
 
 type Provider = "openai" | "anthropic";
 
 interface Preset {
+  id: string;
   label: string;
   provider: Provider;
   baseUrl: string;
@@ -11,15 +13,15 @@ interface Preset {
   note: string;
 }
 
-// Starting points only. Any provider or model name can be typed in directly.
+// Starting points only. Any provider or model name can still be typed in.
 const PRESETS: Preset[] = [
-  { label: "Groq (free tier)", provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b", note: "Free key at console.groq.com. Use Load models to see every model your key can use." },
-  { label: "Google Gemini (free tier)", provider: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", note: "Free key at aistudio.google.com. Tool calling supported." },
-  { label: "OpenRouter (free models)", provider: "openai", baseUrl: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", note: "Free key at openrouter.ai. Models ending in :free cost nothing." },
-  { label: "Ollama (local, no key)", provider: "openai", baseUrl: "http://172.19.0.1:11434/v1", model: "qwen2.5:7b", note: "Runs on this machine. Pull a model with tool support first: ollama pull qwen2.5:7b. The URL is the Docker host bridge IP as seen from the cluster." },
-  { label: "OpenAI", provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", note: "Paid API key from platform.openai.com." },
-  { label: "Anthropic (Claude)", provider: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5-5", note: "Paid API key from console.anthropic.com." },
-  { label: "Custom OpenAI-compatible", provider: "openai", baseUrl: "", model: "", note: "Any server that implements /chat/completions with tools." },
+  { id: "groq", label: "Groq", provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b", note: "Free key at console.groq.com. Fast, with tool calling." },
+  { id: "gemini", label: "Google Gemini", provider: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", note: "Free key at aistudio.google.com." },
+  { id: "openrouter", label: "OpenRouter", provider: "openai", baseUrl: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", note: "Models ending in :free cost nothing." },
+  { id: "ollama", label: "Ollama", provider: "openai", baseUrl: "http://172.19.0.1:11434/v1", model: "qwen2.5:7b", note: "Runs on this machine, no key. Pull a model with tool support first." },
+  { id: "openai", label: "OpenAI", provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", note: "Paid key from platform.openai.com." },
+  { id: "anthropic", label: "Anthropic", provider: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5-5", note: "Paid key from console.anthropic.com." },
+  { id: "custom", label: "Custom", provider: "openai", baseUrl: "", model: "", note: "Any server that implements /chat/completions with tools." },
 ];
 
 interface LlmView {
@@ -28,146 +30,143 @@ interface LlmView {
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  catalog: string[];
+  catalogAt: string | null;
 }
 
 export function LlmPage() {
   const [current, setCurrent] = useState<LlmView | null>(null);
   const [form, setForm] = useState({ provider: "openai" as Provider, baseUrl: "", model: "", apiKey: "" });
-  const [presetIndex, setPresetIndex] = useState(-1);
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  function apply(v: LlmView) {
+    setCurrent(v);
+    setCatalog(v.catalog ?? []);
+    setForm((f) => ({ ...f, provider: v.provider, baseUrl: v.baseUrl, model: v.model }));
+    const match = PRESETS.find((p) => p.baseUrl && p.baseUrl === v.baseUrl);
+    setPresetId(match?.id ?? null);
+  }
 
   useEffect(() => {
     api<LlmView>("GET", "/api/llm")
-      .then((v) => {
-        setCurrent(v);
-        setForm((f) => ({ ...f, provider: v.provider, baseUrl: v.baseUrl, model: v.model }));
-      })
+      .then(apply)
       .catch((e) => setStatus({ kind: "error", text: e.message }));
   }, []);
 
-  function applyPreset(i: number) {
-    setPresetIndex(i);
-    const p = PRESETS[i];
-    if (!p) return;
-    setForm((f) => ({ ...f, provider: p.provider, baseUrl: p.baseUrl, model: p.model }));
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setStatus(null);
+    try {
+      await fn();
+    } catch (err) {
+      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Failed" });
+    } finally {
+      setBusy(null);
+    }
   }
 
-  // Saves the form as shown. The form is the source of truth, so Save and Test
-  // always act on what is on screen, never on an older saved value.
+  // Saves the form as shown. The form is the source of truth.
   async function saveSettings() {
-    // An empty key field keeps the stored key. The key itself is never sent back.
     const body: Record<string, unknown> = { provider: form.provider, baseUrl: form.baseUrl, model: form.model };
     if (form.apiKey) body.apiKey = form.apiKey;
     await api("PUT", "/api/llm", body);
-    const v = await api<LlmView>("GET", "/api/llm");
-    setCurrent(v);
     setForm((f) => ({ ...f, apiKey: "" }));
+    apply(await api<LlmView>("GET", "/api/llm"));
+  }
+
+  function choosePreset(p: Preset) {
+    setPresetId(p.id);
+    setForm((f) => ({ ...f, provider: p.provider, baseUrl: p.baseUrl, model: p.model }));
+  }
+
+  async function useModel(model: string) {
+    setForm((f) => ({ ...f, model }));
+    await run("use", async () => {
+      await api("PUT", "/api/llm", { provider: form.provider, baseUrl: form.baseUrl, model });
+      apply(await api<LlmView>("GET", "/api/llm"));
+      setStatus({ kind: "ok", text: `${model} is now the model for the chat agent.` });
+    });
   }
 
   async function save(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setStatus(null);
-    try {
+    await run("save", async () => {
       await saveSettings();
       setStatus({ kind: "ok", text: "Saved." });
-    } catch (err) {
-      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Save failed" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function test() {
-    setBusy(true);
-    setStatus(null);
-    try {
-      await saveSettings();
-      const r = await api<{ reply: string }>("POST", "/api/llm/test");
-      setStatus({ kind: "ok", text: `Saved, and the model answered: ${r.reply}` });
-    } catch (err) {
-      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Test failed" });
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function loadModels() {
-    setBusy(true);
-    setStatus(null);
-    try {
+    await run("models", async () => {
+      await saveSettings();
       const r = await api<{ models: string[] }>("GET", "/api/llm/models");
-      setModels(r.models);
-      setStatus({ kind: "ok", text: `${r.models.length} models available for this key. Pick one below.` });
-    } catch (err) {
-      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Could not list models" });
-    } finally {
-      setBusy(false);
-    }
+      setCatalog(r.models);
+      setStatus({ kind: "ok", text: `${r.models.length} models stored from this provider.` });
+    });
   }
 
-  const preset = presetIndex >= 0 ? PRESETS[presetIndex] : undefined;
+  async function test() {
+    await run("test", async () => {
+      await saveSettings();
+      const r = await api<{ reply: string }>("POST", "/api/llm/test");
+      setStatus({ kind: "ok", text: `Model answered: ${r.reply}` });
+    });
+  }
+
+  const shown = catalog.filter((m) => m.toLowerCase().includes(filter.toLowerCase()));
+  const preset = PRESETS.find((p) => p.id === presetId);
+  const inUse = current?.configured ? current.model : null;
 
   return (
-    <section>
-      <h2>Model for the chat agent</h2>
-      <p className="muted">
-        Pick any provider and model. Free options: Groq, Google Gemini, OpenRouter (":free" models) and Ollama on this machine.
-        The API key is encrypted on save and never shown again.
-      </p>
-
-      <div className="card">
-        <strong>Current</strong>
-        {current === null ? (
-          <p className="muted small">Loading…</p>
-        ) : current.configured ? (
-          <p className="small">
-            {current.model} via {current.baseUrl} ({current.provider}) · key {current.hasKey ? "stored" : "not needed"}
-          </p>
+    <div className="model-page">
+      <div className="card in-use">
+        <div className="card-head">
+          <h3>Model in use</h3>
+          {current?.configured ? <span className="badge read">Active</span> : <span className="badge write">Not set</span>}
+        </div>
+        {current?.configured ? (
+          <div className="model-row">
+            <Logo id={presetFor(current.baseUrl, current.provider)} size={44} />
+            <div>
+              <div className="strong big">{current.model}</div>
+              <div className="muted small">
+                {current.baseUrl} · {current.provider === "anthropic" ? "Anthropic protocol" : "OpenAI-compatible"} · key {current.hasKey ? "stored" : "not needed"}
+              </div>
+            </div>
+          </div>
         ) : (
-          <p className="small error">No model configured. Chat is disabled until you save one.</p>
+          <p className="error">No model is set. Chat is disabled until you pick one.</p>
         )}
       </div>
 
+      <h3 className="section">Provider</h3>
+      <div className="provider-grid">
+        {PRESETS.map((p) => (
+          <button key={p.id} className={`provider ${presetId === p.id ? "selected" : ""}`} onClick={() => choosePreset(p)}>
+            <Logo id={p.id} size={34} />
+            <span className="provider-name">{p.label}</span>
+            <span className="muted small">{p.provider === "anthropic" ? "Native" : "OpenAI-compatible"}</span>
+          </button>
+        ))}
+      </div>
+      {preset && <p className="small muted hint">{preset.note}</p>}
+
       <form className="card" onSubmit={save}>
         <div className="grid">
-          <label>
-            Preset
-            <select value={presetIndex} onChange={(e) => applyPreset(Number(e.target.value))}>
-              <option value={-1}>Choose a starting point…</option>
-              {PRESETS.map((p, i) => (
-                <option key={p.label} value={i}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Protocol
-            <select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Provider })}>
-              <option value="openai">OpenAI-compatible (most providers)</option>
-              <option value="anthropic">Anthropic native</option>
-            </select>
-          </label>
           <label className="span2">
             Base URL
             <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" required />
           </label>
           <label>
-            Model name
-            <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="any model your provider accepts" required />
-            {models.length > 0 && (
-              <select value={models.includes(form.model) ? form.model : ""} onChange={(e) => setForm({ ...form, model: e.target.value })}>
-                <option value="">Pick from the provider's list…</option>
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            )}
+            Protocol
+            <select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Provider })}>
+              <option value="openai">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic native</option>
+            </select>
           </label>
           <label>
             API key
@@ -175,25 +174,61 @@ export function LlmPage() {
               type="password"
               value={form.apiKey}
               onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-              placeholder={current?.hasKey ? "stored; leave blank to keep" : "paste key (not needed for local Ollama)"}
+              placeholder={current?.hasKey ? "stored. Leave blank to keep it" : "paste key (not needed for local Ollama)"}
               autoComplete="off"
             />
           </label>
+          <label className="span2">
+            Model name
+            <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="any model your provider accepts" required />
+          </label>
         </div>
-        {preset && <p className="small muted">{preset.note}</p>}
         <div className="row">
-          <button type="submit" disabled={busy}>
-            Save model
+          <button type="submit" className="primary" disabled={!!busy}>
+            {busy === "save" ? "Saving…" : "Save"}
           </button>
-          <button type="button" onClick={loadModels} disabled={busy || !current?.configured}>
-            Load models from provider
+          <button type="button" onClick={test} disabled={!!busy || !form.model || !form.baseUrl}>
+            {busy === "test" ? "Testing…" : "Save and test"}
           </button>
-          <button type="button" onClick={test} disabled={busy || !form.model || !form.baseUrl}>
-            Save and test model
+          <button type="button" onClick={loadModels} disabled={!!busy || !form.baseUrl}>
+            {busy === "models" ? "Loading…" : "Load models from provider"}
           </button>
         </div>
-        {status && <p className={status.kind === "ok" ? "small" : "error small"}>{status.text}</p>}
+        {status && <p className={status.kind === "ok" ? "small status-line ok" : "small status-line err"}>{status.text}</p>}
       </form>
-    </section>
+
+      <div className="card-head catalog-head">
+        <h3 className="section">Stored models {catalog.length > 0 && <span className="muted small">({catalog.length})</span>}</h3>
+        {catalog.length > 0 && <input className="search" placeholder="Filter models" value={filter} onChange={(e) => setFilter(e.target.value)} />}
+      </div>
+      {catalog.length === 0 ? (
+        <p className="muted small">Click "Load models from provider" to fetch and store the list. Then pick one to use.</p>
+      ) : (
+        <div className="model-grid">
+          {shown.map((m) => (
+            <div key={m} className={`model-card ${inUse === m ? "in-use-card" : ""}`}>
+              <div className="model-name" title={m}>
+                {m}
+              </div>
+              <div className="row between">
+                {inUse === m ? (
+                  <span className="badge read">In use</span>
+                ) : (
+                  <button className="small-btn" onClick={() => useModel(m)} disabled={!!busy}>
+                    Use this model
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
+}
+
+function presetFor(baseUrl: string, provider: Provider): string {
+  if (provider === "anthropic") return "anthropic";
+  const p = PRESETS.find((x) => x.baseUrl && baseUrl.startsWith(x.baseUrl.split("/v1")[0]));
+  return p?.id ?? "custom";
 }

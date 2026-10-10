@@ -14,8 +14,6 @@ export function AuditPage() {
 
   return (
     <section>
-      <h2>Audit log</h2>
-      <p className="muted">Every tool call through the gateway, whether from an external client or the chat agent.</p>
       {error && <p className="error">{error}</p>}
       <table>
         <thead>

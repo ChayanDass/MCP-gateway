@@ -16,6 +16,14 @@ export const config = {
   bootstrapAdminPassword: required("BOOTSTRAP_ADMIN_PASSWORD"),
   // URL of the WooCommerce MCP server, registered as the first system server.
   wooMcpUrl: process.env.WOO_MCP_URL ?? "http://woo-mcp:8080/mcp",
+  githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? "",
+  githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? "",
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  googleAllowedDomains: (process.env.GOOGLE_ALLOWED_DOMAINS ?? "")
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean),
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "",
   dashboardDir: process.env.DASHBOARD_DIR ?? "/app/dashboard",
   // Per-call timeout for an upstream tool call.
   upstreamCallTimeoutMs: Number(process.env.UPSTREAM_CALL_TIMEOUT_MS ?? 15000),

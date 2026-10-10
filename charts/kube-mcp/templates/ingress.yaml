@@ -13,11 +13,12 @@ spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   {{- if $tls.enabled }}
   tls:
-    - hosts: [{{ .Values.ingress.dashboardHost | quote }}]
+    - hosts: {{ toJson .Values.ingress.dashboardHosts }}
       secretName: {{ $tls.dashboardSecret }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.dashboardHost | quote }}
+    {{- range .Values.ingress.dashboardHosts }}
+    - host: {{ . | quote }}
       http:
         paths:
           - path: /api
@@ -32,6 +33,7 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: dashboard, port: { name: http } } }
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

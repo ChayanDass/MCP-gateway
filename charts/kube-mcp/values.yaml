@@ -32,7 +32,9 @@ storage:
 ingress:
   className: nginx
   controllerNamespace: ingress-nginx
-  dashboardHost: kube-mcp.localtest.me
+  # Dashboard hosts. localhost is needed for Google sign-in, which only accepts
+  # plain HTTP on localhost. The older host keeps existing MCP client setups working.
+  dashboardHosts: [localhost, kube-mcp.localtest.me]
   storeHost: store.localtest.me
   annotations: {}
   tls:
@@ -74,3 +76,9 @@ resources:
   dashboard:
     requests: { cpu: 10m, memory: 16Mi }
     limits: { cpu: 100m, memory: 64Mi }
+
+# Google sign-in for the dashboard. The client ID is public, so it can be passed
+# at deploy time with --set-string auth.googleClientId=... and kept out of the repo.
+auth:
+  googleClientId: ""
+  googleAllowedDomains: ""

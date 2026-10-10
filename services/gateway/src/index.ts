@@ -32,11 +32,23 @@ async function bootstrap(): Promise<void> {
 async function main(): Promise<void> {
   await bootstrap();
 
-  const app = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
+  const app = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024, trustProxy: true });
   app.get("/healthz", async () => "ok");
   app.get("/readyz", async () => {
     await pool.query("SELECT 1");
     return "ok";
+  });
+  // Security headers for every response. The MCP endpoint is hijacked and
+  // writes its own headers, so it is not affected.
+  app.addHook("onSend", async (_req, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header(
+      "Content-Security-Policy",
+      "default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; script-src 'self' https://accounts.google.com; connect-src 'self' https://accounts.google.com; frame-src https://accounts.google.com; frame-ancestors 'none'",
+    );
+    return payload;
   });
   registerApi(app);
   app.setNotFoundHandler(async (req, reply) => {

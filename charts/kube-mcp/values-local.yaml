@@ -6,10 +6,10 @@ storage:
 
 ingress:
   className: nginx
-  dashboardHost: kube-mcp.localtest.me
+  dashboardHosts: [localhost, kube-mcp.localtest.me]
   storeHost: store.localtest.me
   tls:
     enabled: false
 
 siteUrl: http://store.localtest.me:8080
-publicBaseUrl: http://kube-mcp.localtest.me:8080
+publicBaseUrl: http://localhost:8080

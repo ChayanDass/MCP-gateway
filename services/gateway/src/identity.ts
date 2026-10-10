@@ -54,12 +54,13 @@ export async function deleteSession(req: IncomingMessage): Promise<void> {
   if (token) await pool.query(`DELETE FROM sessions WHERE token_hash = $1`, [sha256(token)]);
 }
 
-export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`;
+// Secure is set when the gateway is served over HTTPS (PUBLIC_BASE_URL).
+export function sessionCookie(token: string, secure: boolean): string {
+  return `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure ? "; Secure" : ""}`;
 }
 
-export function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
+export function clearSessionCookie(secure: boolean): string {
+  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
 function readCookie(req: IncomingMessage, name: string): string | undefined {
