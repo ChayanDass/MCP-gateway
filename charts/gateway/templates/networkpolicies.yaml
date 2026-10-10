@@ -14,9 +14,11 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - namespaceSelector:
+        # The ingress controller, wherever it runs (the stack installs it in the release namespace).
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.ingress.controllerNamespace | quote }}
+              app.kubernetes.io/name: ingress-nginx
 ---
 # Only the gateway can reach its own database.
 apiVersion: networking.k8s.io/v1

@@ -36,9 +36,11 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - namespaceSelector:
+        # The ingress controller, wherever it runs (the stack installs it in the release namespace).
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              app.kubernetes.io/name: ingress-nginx
         - podSelector:
             matchLabels:
               app.kubernetes.io/part-of: mcp-gateway
