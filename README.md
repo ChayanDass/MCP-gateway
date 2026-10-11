@@ -19,7 +19,7 @@ A team MCP gateway on Kubernetes. It runs a WooCommerce store, a WooCommerce MCP
 
 ## Quick start (local, Kind)
 
-Prerequisites: Docker, `kind`, `kubectl`, `helm` 3. Free ports 80, 8443 and 8080.
+Prerequisites: Docker, `kind`, `kubectl`, `helm` 3. Free ports 80 and 8443.
 
 ```sh
 ./scripts/init.sh
@@ -31,12 +31,12 @@ The script:
 3. Runs one `helm install` for the whole stack.
 4. Waits for the store to finish setting up.
 5. Waits for the WooCommerce MCP server, which uses a key the chart generates.
-6. Starts a small proxy so the dashboard is at http://localhost:8080.
+6. Prints where the store and dashboard are.
 
 Then open:
 
 - **Store:** http://store.localtest.me
-- **Dashboard:** http://localhost:8080, signing in as `admin@example.com`
+- **Dashboard:** http://localhost, signing in as `admin@example.com`
 
 For the manual steps, the Google Cloud setup and troubleshooting, see [docs/SETUP.md](docs/SETUP.md).
 
@@ -79,7 +79,6 @@ kubectl -n kube-mcp get pods
 # Remove everything
 helm uninstall kube-mcp -n kube-mcp
 kind delete cluster --name kube-mcp
-docker rm -f kube-mcp-gateway-proxy
 ```
 
 ## Images

@@ -15,7 +15,7 @@ Before that command you need a Kind cluster, the three MCP images loaded into it
 | Ingress controller (ingress-nginx 4.15.1) | `charts/stack` dependency | ports 80 and 8443 on your machine |
 | Store: WordPress, WooCommerce, MariaDB, setup Job | `charts/store` | http://store.localtest.me |
 | WooCommerce MCP server (`woo-mcp`) | `charts/mcp` | in-cluster only |
-| Gateway, dashboard, Postgres | `charts/gateway` | http://localhost:8080 (see step 5) |
+| Gateway, dashboard, Postgres | `charts/gateway` | http://localhost |
 | Ingress rules for the store and dashboard | `charts/ingress` | — |
 
 Everything runs in the `kube-mcp` namespace. `*.localtest.me` resolves to `127.0.0.1`, so no `/etc/hosts` edits are needed.
@@ -31,7 +31,7 @@ kubectl version --client
 helm version --short
 ```
 
-Keep ports **80**, **8443** and **8080** free on your machine. Port 8080 is used by the proxy in step 5.
+Keep ports **80** and **8443** free on your machine.
 
 ## 2. Create the cluster
 
@@ -99,15 +99,7 @@ kubectl -n kube-mcp get pods
 
 Every pod should be `Running`, except the setup Job, which shows `Completed`.
 
-Then expose the gateway on port 8080. The cluster maps port 80 only, so a small proxy container forwards `localhost:8080` to the ingress:
-
-```sh
-docker run -d --name kube-mcp-gateway-proxy --restart unless-stopped \
-  --network kind -p 127.0.0.1:8080:8080 \
-  alpine/socat TCP-LISTEN:8080,fork,reuseaddr TCP:kube-mcp-control-plane:80
-```
-
-In the Google Cloud Console, add `http://localhost:8080` to the OAuth client's **Authorized JavaScript origins**.
+In the Google Cloud Console, add `http://localhost` to the OAuth client's **Authorized JavaScript origins**.
 
 ## 6. WooCommerce key (automatic)
 
@@ -124,7 +116,7 @@ The first command prints the start of the key (`ck_...`). The second confirms wo
 
 ## 7. Sign in and check
 
-Open http://localhost:8080 and sign in:
+Open http://localhost and sign in:
 
 - **Email:** `admin@example.com`
 - **Password:**
@@ -135,8 +127,8 @@ Open http://localhost:8080 and sign in:
 Check the endpoints:
 
 ```sh
-curl -s -o /dev/null -w "dashboard       %{http_code}\n" http://localhost:8080/
-curl -s -o /dev/null -w "gateway health  %{http_code}\n" http://localhost:8080/healthz
+curl -s -o /dev/null -w "dashboard       %{http_code}\n" http://localhost/
+curl -s -o /dev/null -w "gateway health  %{http_code}\n" http://localhost/healthz
 curl -s -o /dev/null -w "store           %{http_code}\n" http://store.localtest.me/shop/
 ```
 
@@ -187,10 +179,9 @@ Deleting the namespace also deletes the data volumes, so the store and gateway d
 | `x509: certificate signed by unknown authority` on ingress | Admission webhook certificate | Already disabled in `charts/stack/values.yaml` for local use |
 | woo-mcp stuck in `CreateContainerConfigError` | `woo-mcp-credentials` Secret missing | Run `helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml` |
 | `/shop/` returns 404 | Pretty permalinks not written | Re-run `helm upgrade`; the setup Job writes `.htaccess` |
-| `127.0.0.1` returns 404 | Ingress routes by hostname | Use `store.localtest.me` or `localhost:8080` |
+| `127.0.0.1` returns 404 | Ingress routes by hostname | Use `store.localtest.me` or `localhost` |
 | Login says `Invalid email or password` | Typed password differs from the Secret | Copy it from step 7 |
-| Google sign-in shows `origin_mismatch` | Origin not allowed in Cloud Console | Add `http://localhost:8080` (step 5) |
-| `localhost:8080` refuses connection | Proxy container stopped | `docker start kube-mcp-gateway-proxy` |
+| Google sign-in shows `origin_mismatch` | Origin not allowed in Cloud Console | Add `http://localhost` (step 5) |
 | A release reports `exists and cannot be imported` | A resource from an earlier separate install still exists | Uninstall the old release, or recreate the cluster |
 
 ## Security notes

@@ -42,17 +42,9 @@ kubectl -n "$NS" wait --for=condition=complete job/store-setup --timeout=15m
 #    woo-mcp reads it from the woo-mcp-credentials Secret.
 kubectl -n "$NS" rollout status deploy/woo-mcp --timeout=3m
 
-# 6. Port 8080 for the gateway
-if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx kube-mcp-gateway-proxy; then
-  docker rm -f kube-mcp-gateway-proxy >/dev/null 2>&1 || true
-  docker run -d --name kube-mcp-gateway-proxy --restart unless-stopped \
-    --network kind -p 127.0.0.1:8080:8080 \
-    alpine/socat TCP-LISTEN:8080,fork,reuseaddr TCP:kube-mcp-control-plane:80 >/dev/null
-fi
-
 echo
 echo "Done."
 echo "  Store:     http://store.localtest.me"
-echo "  Dashboard: http://localhost:8080   (user admin@example.com)"
+echo "  Dashboard: http://localhost   (user admin@example.com)"
 echo "  Gateway admin password: see README, \"Admin passwords\""
 echo "  WooCommerce MCP key: generated in the woo-mcp-credentials Secret (no manual step)"
