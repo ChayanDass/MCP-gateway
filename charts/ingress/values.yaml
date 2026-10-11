@@ -1,6 +1,8 @@
 # Routing only. The ingress-nginx controller is configured in the stack chart.
 ingress:
   className: nginx
+  # Extra annotations on the store ingress (e.g. for gitops checks).
+  annotations: {}
   store:
     host: store.localtest.me
     service: wordpress

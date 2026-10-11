@@ -6,10 +6,13 @@ metadata:
   name: store
   labels:
     app.kubernetes.io/part-of: kube-mcp
-  {{- if $tls.clusterIssuer }}
   annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if $tls.clusterIssuer }}
     cert-manager.io/cluster-issuer: {{ $tls.clusterIssuer | quote }}
-  {{- end }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   {{- if $tls.enabled }}

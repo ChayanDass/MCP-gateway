@@ -41,6 +41,8 @@ mcp:
 
 ingress:
   ingress:
+    annotations:
+      gitops-check: "argo-autosync-test-1"
     store:
       host: store.13.200.126.173.nip.io
     dashboard:
