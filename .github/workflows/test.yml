@@ -84,6 +84,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: helm/kind-action@v1
         with:
+          cluster_name: kube-mcp
           config: infra/kind/kind.yaml
           wait: 120s
       - uses: azure/setup-helm@v4
@@ -91,7 +92,6 @@ jobs:
           version: v3.16.2
       - name: Install the stack
         run: |
-          kubectl label node kube-mcp-control-plane ingress-ready=true --overwrite
           helm dependency build charts/stack
           helm install kube-mcp charts/stack -n kube-mcp --create-namespace \
             -f charts/stack/values-secrets.example.yaml -f charts/stack/values-dev.yaml \
