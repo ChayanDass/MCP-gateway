@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./api";
 import { Login } from "./Login";
 import { Shell } from "./Shell";
+import { Toaster } from "./toast";
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -35,6 +36,6 @@ export function App() {
     );
   }
   if (me === undefined) return <p className="muted pad">Loading…</p>;
-  if (me === null) return <Login onLogin={setMe} />;
-  return <Shell me={me} onLogout={() => setMe(null)} />;
+  if (me === null) return <><Login onLogin={setMe} /><Toaster /></>;
+  return <><Shell me={me} onLogout={() => setMe(null)} /><Toaster /></>;
 }

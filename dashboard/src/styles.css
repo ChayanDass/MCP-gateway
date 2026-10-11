@@ -678,3 +678,14 @@ button.ghost { border-color: var(--border); }
 .fatal-actions { display: flex; gap: var(--space-2); margin-top: var(--space-6); flex-wrap: wrap; }
 .fatal-details { margin-top: var(--space-6); color: var(--muted); font-size: 13px; }
 .fatal-details pre { white-space: pre-wrap; }
+
+/* ---- Toasts ---- */
+.toasts { position: fixed; right: var(--space-4); bottom: var(--space-4); display: grid; gap: var(--space-2); z-index: 60; width: min(380px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); animation: toast-in 180ms ease-out; }
+.toast-error { border-color: var(--danger); }
+.toast-error .toast-text { color: var(--danger); }
+.toast-ok { border-color: var(--ok); }
+.toast-text { flex: 1; font-size: 13.5px; line-height: 1.45; }
+.toast-close { min-height: 22px; padding: 0 6px; border: none; background: none; color: var(--muted); font-size: 18px; line-height: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

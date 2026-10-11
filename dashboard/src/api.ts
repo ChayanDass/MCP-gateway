@@ -1,3 +1,5 @@
+import { notify } from "./toast";
+
 // Thin fetch wrapper. The session lives in an HttpOnly cookie, so the
 // browser never handles a token the page can read.
 export class ApiError extends Error {
@@ -14,7 +16,13 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as { error?: string } & T;
-  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
+  if (!res.ok) {
+    const error = new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
+    // Every failed change shows a message, even on pages that don't show their own.
+    // Sign-in failures and session checks report on their own, so they are skipped.
+    if (method !== "GET" && res.status !== 401 && !path.startsWith("/api/auth/")) notify(error.message, "error");
+    throw error;
+  }
   return data as T;
 }
 
