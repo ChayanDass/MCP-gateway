@@ -670,3 +670,11 @@ button.ghost { border-color: var(--border); }
 .composer button { border-radius: 999px; min-width: 96px; }
 .tool-block { border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
 .tool-item { font-size: 13px; }
+
+/* ---- Error and recovery screens ---- */
+.fatal { min-height: 100vh; display: grid; place-items: center; padding: var(--space-6); background: var(--bg); }
+.fatal-card { width: min(520px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-8); box-shadow: var(--shadow); }
+.fatal-card h1 { font-size: 22px; margin-bottom: var(--space-2); }
+.fatal-actions { display: flex; gap: var(--space-2); margin-top: var(--space-6); flex-wrap: wrap; }
+.fatal-details { margin-top: var(--space-6); color: var(--muted); font-size: 13px; }
+.fatal-details pre { white-space: pre-wrap; }
