@@ -162,6 +162,8 @@ export function registerApi(app: FastifyInstance): void {
     const servers = await upstreams.loadServers();
     const overrides = await loadOverrides();
     const myTokens = await oauthTokensFor(viewer.id);
+    // Each viewer sees only the tools they may call. Admins see all of them.
+    const viewerCtx = await accessContext(viewer);
     const views = await Promise.all(
       servers.map(async (s) => {
         // OAuth servers have no shared status: each viewer sees their own connection.
@@ -174,9 +176,10 @@ export function registerApi(app: FastifyInstance): void {
             const reconnect = /401|403|Unauthorized/i.test(probe.error);
             return serverView(s, [], reconnect ? "reconnect" : "unreachable", probe.error, 0, overrides);
           }
-          return serverView(s, probe.tools, "connected", null, probe.tools.length, overrides);
+          const mine = probe.tools.filter((t) => canCall(viewerCtx, s.id, t as never));
+          return serverView(s, mine, "connected", null, mine.length, overrides);
         }
-        const tools = s.enabled ? await upstreams.toolsFor(s) : [];
+        const tools = s.enabled ? (await upstreams.toolsFor(s)).filter((t) => canCall(viewerCtx, s.id, t as never)) : [];
         const st = upstreams.status(s.id);
         return {
           id: s.id,
