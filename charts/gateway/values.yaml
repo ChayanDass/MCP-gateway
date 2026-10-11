@@ -7,8 +7,8 @@ imagePullPolicy: IfNotPresent
 
 images:
   postgres: postgres:16-alpine
-  gateway: ghcr.io/chayandass/kube-mcp/gateway:0.1.0
-  dashboard: ghcr.io/chayandass/kube-mcp/dashboard:0.1.0
+  gateway: ghcr.io/chayandass/kube-mcp/gateway:798898aec2d025f28e09b902b834a4c94060e4eb
+  dashboard: ghcr.io/chayandass/kube-mcp/dashboard:798898aec2d025f28e09b902b834a4c94060e4eb
 
 replicas:
   gateway: 1
