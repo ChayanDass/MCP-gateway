@@ -1,68 +1,73 @@
 /* Dark graphite surfaces with a vivid green accent. */
 :root {
-  /* Design tokens. Dark is the default; light follows the system setting. */
-  --bg: #0b0f0d;
-  --surface: #121814;
-  --surface-2: #19221c;
-  --surface-hover: #1e2a22;
-  --border: #29372d;
-  --border-strong: #3a4d40;
-  --fg: #eef5f0;
-  --fg-strong: #ffffff;
-  --muted: #93a398;
-  --accent: #6fdc84;
-  --accent-hover: #86e897;
-  --accent-fg: #06100a;
-  --accent-soft: #163221;
-  --danger: #ff7a7a;
-  --danger-soft: #3a1c1c;
-  --ok: #6fdc84;
-  --ok-soft: #163221;
-  --warn: #f2c765;
-  --warn-soft: #3a3016;
-  --focus: 0 0 0 3px rgba(111, 220, 132, 0.45);
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
-  --sidebar: #0b0f0d;
-  --sidebar-fg: #b9c8be;
+  /* Indigo theme. The sidebar is a separate, deeper tone so it reads as its own panel. */
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #273449;
+  --surface-hover: #2f3e57;
+  --border: #334155;
+  --border-strong: #475569;
+  --fg: #e2e8f0;
+  --fg-strong: #f8fafc;
+  --muted: #94a3b8;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-fg: #0b1020;
+  --accent-soft: #232247;
+  --danger: #f87171;
+  --danger-soft: #3b1d26;
+  --ok: #34d399;
+  --ok-soft: #0f2e26;
+  --warn: #fbbf24;
+  --warn-soft: #3a2d0c;
+  --focus: 0 0 0 3px rgba(129, 140, 248, 0.45);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.28);
+  --sidebar: #0b1020;
+  --sidebar-fg: #c7d2fe;
+  --sidebar-hover: rgba(255, 255, 255, 0.07);
+  --sidebar-active: rgba(129, 140, 248, 0.2);
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f5f7f5;
+    --bg: #f1f5f9;
     --surface: #ffffff;
-    --surface-2: #eef2ef;
-    --surface-hover: #e6ece8;
-    --border: #d6ded8;
-    --border-strong: #b8c4bc;
-    --fg: #111a14;
-    --fg-strong: #0a120c;
-    --muted: #5d6f63;
-    --accent: #1f9d4f;
-    --accent-hover: #178741;
+    --surface-2: #f8fafc;
+    --surface-hover: #e2e8f0;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --fg: #0f172a;
+    --fg-strong: #020617;
+    --muted: #64748b;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
     --accent-fg: #ffffff;
-    --accent-soft: #e2f4e8;
-    --danger: #c93a3a;
-    --danger-soft: #fbe6e6;
-    --ok: #1f9d4f;
-    --ok-soft: #e2f4e8;
-    --warn: #9a6a00;
-    --warn-soft: #fbf1d6;
-    --focus: 0 0 0 3px rgba(31, 157, 79, 0.35);
-    --shadow: 0 1px 2px rgba(10, 18, 12, 0.06), 0 8px 24px rgba(10, 18, 12, 0.08);
-    --sidebar: #ffffff;
-    --sidebar-fg: #3d4f43;
+    --accent-soft: #eef2ff;
+    --danger: #dc2626;
+    --danger-soft: #fee2e2;
+    --ok: #059669;
+    --ok-soft: #d1fae5;
+    --warn: #b45309;
+    --warn-soft: #fef3c7;
+    --focus: 0 0 0 3px rgba(79, 70, 229, 0.35);
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 30px rgba(15, 23, 42, 0.08);
+    --sidebar: #1e1b4b;
+    --sidebar-fg: #c7d2fe;
+    --sidebar-hover: rgba(255, 255, 255, 0.08);
+    --sidebar-active: rgba(129, 140, 248, 0.28);
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
-  --bg: #f5f7f5; --surface: #ffffff; --surface-2: #eef2ef; --surface-hover: #e6ece8;
-  --border: #d6ded8; --border-strong: #b8c4bc; --fg: #111a14; --fg-strong: #0a120c; --muted: #5d6f63;
-  --accent: #1f9d4f; --accent-hover: #178741; --accent-fg: #ffffff; --accent-soft: #e2f4e8;
-  --danger: #c93a3a; --danger-soft: #fbe6e6; --ok: #1f9d4f; --ok-soft: #e2f4e8; --warn: #9a6a00; --warn-soft: #fbf1d6;
-  --sidebar: #ffffff; --sidebar-fg: #3d4f43; color-scheme: light;
+  --bg: #f1f5f9; --surface: #ffffff; --surface-2: #f8fafc; --surface-hover: #e2e8f0;
+  --border: #e2e8f0; --border-strong: #cbd5e1; --fg: #0f172a; --fg-strong: #020617; --muted: #64748b;
+  --accent: #4f46e5; --accent-hover: #4338ca; --accent-fg: #ffffff; --accent-soft: #eef2ff;
+  --danger: #dc2626; --danger-soft: #fee2e2; --ok: #059669; --ok-soft: #d1fae5; --warn: #b45309; --warn-soft: #fef3c7;
+  --sidebar: #1e1b4b; --sidebar-fg: #c7d2fe; --sidebar-hover: rgba(255, 255, 255, 0.08); --sidebar-active: rgba(129, 140, 248, 0.28);
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 body {
@@ -700,3 +705,23 @@ button.ghost { border-color: var(--border); }
 .theme-switch:hover { background: var(--surface-hover); }
 
 .toasts { top: var(--space-4); bottom: auto; }
+
+
+/* ---- Sidebar: its own panel, with its own text and hover colours ---- */
+.sidebar { --fg-strong: #ffffff; --muted: #a5b4fc; background: var(--sidebar); border-right: 1px solid rgba(255, 255, 255, 0.06); }
+.sidebar .brand-name, .sidebar .account-name { color: #ffffff; }
+.sidebar .brand-sub, .sidebar .account-role { color: #a5b4fc; }
+.sidebar .nav-item, .sidebar .nav-parent { color: var(--sidebar-fg); }
+.sidebar .nav-item:hover, .sidebar .nav-parent:hover { background: var(--sidebar-hover); color: #ffffff; }
+.sidebar .nav-item.active, .sidebar .nav-parent.in { background: var(--sidebar-active); color: #ffffff; }
+.sidebar .nav-item.active::before { background: #a5b4fc; }
+.sidebar .account { background: rgba(255, 255, 255, 0.06); }
+.sidebar .avatar { background: #818cf8; color: #0b1020; }
+.sidebar .theme-switch { color: var(--sidebar-fg); border-color: rgba(255, 255, 255, 0.14); }
+.sidebar .theme-switch:hover { background: var(--sidebar-hover); }
+.sidebar button.ghost { color: var(--sidebar-fg); border-color: rgba(255, 255, 255, 0.18); }
+.sidebar button.ghost:hover { background: var(--sidebar-hover); }
+.sidebar .nav-sub { border-left-color: rgba(255, 255, 255, 0.12); }
+
+/* Content: a softer canvas so cards stand out from the page. */
+.content { background: var(--bg); }
