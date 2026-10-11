@@ -12,8 +12,19 @@ const MAX_TOOL_RESULT_CHARS = 3000;
 
 const SYSTEM =
   "You are an operations assistant for a WooCommerce hosting team. Use the available tools to answer. " +
-  "Tool names are prefixed with the server slug. If a tool fails, say so plainly and do not invent data. " +
+  "Tool names are prefixed with the server slug. " +
+  "When a tool call fails, reason about the cause before doing anything else: " +
+  "read the error text, compare the arguments you sent with the tool's input schema, and work out what is missing or wrong. " +
+  "Then either retry once or twice with corrected arguments, or stop and tell the user exactly what is missing. " +
+  "Do not guess values the user did not give you (for example a price or a product ID); ask for them instead. " +
+  "Never invent data. In your reply, say briefly what failed, why, and what you did about it. " +
   "Format answers as Markdown. Put every table row on its own line, with a header separator row.";
+
+// Added to a failed tool result, so the model reasons about the failure rather than
+// treating the error text as the answer.
+const ERROR_HINT =
+  "The tool call failed. Work out why from the error (missing or invalid argument, not found, permission, timeout, or a bad signature), " +
+  "correct the arguments and retry, or ask the user for the missing information. Do not report the raw error as the final answer.\n";
 
 export interface ToolCallMeta {
   id: string;
@@ -122,7 +133,7 @@ export async function runChat(user: Identity, conversationId: string | null, mes
       const text = result.content.map((c) => ("text" in c ? c.text : JSON.stringify(c))).join("\n");
       const isError = Boolean(result.isError);
       const outcome = isError ? (/not allowed/i.test(text) ? "denied" : "error") : "ok";
-      const modelText = truncate(text);
+      const modelText = isError ? ERROR_HINT + truncate(text) : truncate(text);
       calls.push({ id: call.id, name: call.name, args: call.args, isError, durationMs: Date.now() - started, outcome, result: text.slice(0, 1200) });
       results.push({ toolCallId: call.id, content: modelText, isError });
       history.push({ role: "tool", toolCallId: call.id, isError, content: modelText });
