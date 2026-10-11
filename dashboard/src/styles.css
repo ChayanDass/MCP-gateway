@@ -615,3 +615,58 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 550; margi
 .dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: grid; place-items: center; padding: var(--space-4); z-index: 50; }
 .dialog { width: min(440px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-6); box-shadow: var(--shadow); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
+
+/* ---- Phase 3: visible polish across the dashboard ---- */
+
+/* Buttons: one shape, clear focus, calm hover. */
+button {
+  min-height: 38px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+button:focus-visible { outline: none; box-shadow: var(--focus); }
+button.small-btn { min-height: 30px; padding: 0 var(--space-3); font-size: 13px; border-radius: 7px; }
+button.danger { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+button.danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); filter: brightness(1.05); }
+button.ghost { border-color: var(--border); }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); filter: none; }
+
+/* Page headers: larger title, a clear subtitle, and room to breathe. */
+.page-head { padding: 32px 0 22px; margin-bottom: 26px; }
+.page-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg-strong); }
+.page-head p { color: var(--muted); font-size: 14.5px; max-width: 70ch; }
+
+/* Sidebar: a clear active item with an accent bar. */
+.nav-item { border-radius: var(--radius-sm); position: relative; min-height: 38px; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.nav-item.active::before { content: ""; position: absolute; left: -14px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.brand-mark { color: var(--accent); }
+
+/* Server cards: a proper card with a soft lift on hover. */
+.server-tile, .provider-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: var(--space-6);
+  gap: var(--space-4);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.server-tile:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.tile-grid { gap: var(--space-4); }
+.tile-name strong { font-size: 15px; color: var(--fg-strong); }
+.tile-tags .tag { background: var(--surface-2); color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+
+/* Chat: bubbles that read at a glance. */
+.chat-scroll { padding: 28px 28px 12px; gap: 20px; }
+.msg-body { border-radius: 16px; padding: 12px 16px; max-width: 72ch; line-height: 1.6; box-shadow: none; }
+.msg.assistant .msg-body, .msg-body { background: var(--surface-2); border: 1px solid var(--border); }
+.msg.user .msg-body, .msg.me .msg-body { background: var(--accent-soft); border-color: transparent; }
+.composer { padding: var(--space-4); gap: var(--space-3); }
+.composer input { border-radius: 999px; padding: 12px 18px; border: 1px solid var(--border-strong); background: var(--surface-2); }
+.composer input:focus { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
+.composer button { border-radius: 999px; min-width: 96px; }
+.tool-block { border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.tool-item { font-size: 13px; }
