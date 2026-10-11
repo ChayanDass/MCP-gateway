@@ -7,7 +7,7 @@
 imagePullPolicy: IfNotPresent
 
 images:
-  wooMcp: ghcr.io/chayandass/kube-mcp/woo-mcp:40eeeeea52f7357eae2cff1c6d657cf0d863ebb3
+  wooMcp: ghcr.io/chayandass/kube-mcp/woo-mcp:637a850ea3bdd52f24f6f06285e0a7de6ef0aa4e
 
 replicas:
   wooMcp: 1
