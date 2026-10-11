@@ -1,0 +1,29 @@
+{
+  "display_information": {
+    "name": "kube-mcp gateway",
+    "description": "Lets team members use Slack through the kube-mcp gateway, with their own Slack account."
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "https://kube-mcp.13.200.126.173.nip.io/api/oauth/slack/callback",
+      "http://localhost/api/oauth/slack/callback"
+    ],
+    "scopes": {
+      "user": [
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read",
+        "channels:history",
+        "chat:write",
+        "search:read",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
