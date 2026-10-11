@@ -34,3 +34,13 @@ Priorities: **P0** blocks the assignment or breaks something users rely on. **P1
 - [ ] Tool search, so ten servers do not mean hundreds of tools in one prompt.
 - [ ] Metrics per server (calls, errors, latency) and rate limits per key.
 - [ ] Multi-store provisioning (bonus).
+
+## Performance and UX (in progress)
+- [x] Pages load on demand: the main bundle went from about 443 kB to 238 kB.
+- [x] Assistant button at the bottom right on every page.
+- [x] Theme switch: light, dark or system, saved per browser.
+- [x] Gzip and long-term caching for built assets.
+- [ ] Gateway: compression and caching headers on its API responses.
+- [ ] Gateway: paging on the audit log and tool lists, with server-side filters.
+- [ ] Dashboard: keyboard shortcuts and a command palette (Ctrl+K).
+- [ ] Redesign the remaining admin pages in the new components.

@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
+import { Skeleton } from "./ui";
+import { getTheme, setTheme, type ThemeChoice } from "./theme";
 import { api, type Me } from "./api";
 import { navigate, useRoute } from "./router";
-import { ServersPage } from "./ServersPage";
-import { ServerDetailPage } from "./ServerDetailPage";
-import { ProvidersPage } from "./ProvidersPanel";
-import { MembersPage } from "./MembersPage";
-import { AuditPage } from "./AuditPage";
-import { ChatPage } from "./ChatPage";
-import { ClientsPage } from "./ClientsPage";
-import { LlmPage } from "./LlmPage";
-import { OverviewPage } from "./OverviewPage";
-import { ToolPermissionsPage } from "./ToolPermissionsPage";
+const ServersPage = lazy(() => import("./ServersPage").then((m) => ({ default: m.ServersPage })));
+const ServerDetailPage = lazy(() => import("./ServerDetailPage").then((m) => ({ default: m.ServerDetailPage })));
+const ProvidersPage = lazy(() => import("./ProvidersPanel").then((m) => ({ default: m.ProvidersPage })));
+const MembersPage = lazy(() => import("./MembersPage").then((m) => ({ default: m.MembersPage })));
+const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
+const ChatPage = lazy(() => import("./ChatPage").then((m) => ({ default: m.ChatPage })));
+const ClientsPage = lazy(() => import("./ClientsPage").then((m) => ({ default: m.ClientsPage })));
+const LlmPage = lazy(() => import("./LlmPage").then((m) => ({ default: m.LlmPage })));
+const OverviewPage = lazy(() => import("./OverviewPage").then((m) => ({ default: m.OverviewPage })));
+const ToolPermissionsPage = lazy(() => import("./ToolPermissionsPage").then((m) => ({ default: m.ToolPermissionsPage })));
 
 interface Item {
   key: string; // the address, e.g. "security/members"
@@ -152,6 +154,7 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             ),
           )}
         </nav>
+        <ThemeSwitch />
         <div className="account">
           <div className="avatar">{me.name.slice(0, 1).toUpperCase()}</div>
           <div className="account-text">
@@ -171,6 +174,7 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <p className="muted">{route[0] === "servers" && route[1] ? "One server, its tools and its settings." : info.hint}</p>
           </header>
           <main>
+            <Suspense fallback={<Skeleton lines={5} />}>
             {route[0] === "servers" && route[1] ? (
               <ServerDetailPage id={route[1]} tab={(route[2] as "overview" | "tools" | "settings") || "overview"} isAdmin={isAdmin} />
             ) : (
@@ -186,9 +190,38 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {active === "settings/model" && isAdmin && <LlmPage />}
               </>
             )}
+            </Suspense>
           </main>
+          {active !== "chat" && (
+            <button className="fab-chat" onClick={() => navigate("chat")} aria-label="Open the assistant" title="Ask the assistant">
+              <span aria-hidden="true">✦</span>
+              <span className="fab-label">Ask</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+// Light, dark, or system. Cycles on click and shows the current choice.
+function ThemeSwitch() {
+  const [choice, setChoice] = useState<ThemeChoice>(getTheme());
+  const next: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
+  const label: Record<ThemeChoice, string> = { system: "Auto", light: "Light", dark: "Dark" };
+  return (
+    <button
+      className="theme-switch"
+      onClick={() => {
+        const n = next[choice];
+        setTheme(n);
+        setChoice(n);
+      }}
+      aria-label={`Theme: ${label[choice]}. Click to change.`}
+      title="Change theme"
+    >
+      <span aria-hidden="true">{choice === "dark" ? "☾" : choice === "light" ? "☀" : "◐"}</span>
+      <span>{label[choice]}</span>
+    </button>
   );
 }
