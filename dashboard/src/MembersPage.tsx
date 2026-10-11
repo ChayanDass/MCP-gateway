@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, type Me, type ServerView, type UserView } from "./api";
 import { UserEditor } from "./UserEditor";
+import { Modal } from "./Modal";
 
 // Admin only: create members, give and revoke their access, disable or delete them.
 export function MembersPage({ me }: { me: Me }) {
@@ -137,8 +138,8 @@ export function MembersPage({ me }: { me: Me }) {
                   <span className={u.disabled ? "badge blocked" : "badge read"}>{u.disabled ? "Disabled" : "Active"}</span>
                 </td>
                 <td className="actions-cell">
-                  <button className="small-btn" onClick={() => setEditing(editing === u.id ? null : u.id)}>
-                    {editing === u.id ? "Close" : "Permissions"}
+                  <button className="small-btn" onClick={() => setEditing(u.id)}>
+                    Permissions
                   </button>
                 </td>
               </tr>
@@ -155,7 +156,9 @@ export function MembersPage({ me }: { me: Me }) {
       </div>
 
       {selected && (
-        <UserEditor key={selected.id} user={selected} isSelf={selected.id === me.id} onChanged={reload} onClose={() => setEditing(null)} />
+        <Modal title={`Permissions: ${selected.name || selected.email}`} subtitle={selected.email} onClose={() => setEditing(null)} wide>
+          <UserEditor key={selected.id} user={selected} isSelf={selected.id === me.id} onChanged={reload} onClose={() => setEditing(null)} />
+        </Modal>
       )}
     </div>
   );

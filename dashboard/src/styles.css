@@ -725,3 +725,7 @@ button.ghost { border-color: var(--border); }
 
 /* Content: a softer canvas so cards stand out from the page. */
 .content { background: var(--bg); }
+
+/* Chat: user messages are dark text on a light bubble in both themes. */
+.msg.user .msg-body { background: var(--accent-soft); color: var(--fg-strong); border-color: transparent; }
+.msg.user .msg-body * { color: inherit; }
