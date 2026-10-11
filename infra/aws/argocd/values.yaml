@@ -1,0 +1,19 @@
+# Argo CD for a small cluster: only the parts this project uses.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  replicas: 0
+controller:
+  replicas: 1
+server:
+  service:
+    type: ClusterIP
+repoServer:
+  replicas: 1
+configs:
+  cm:
+    # Track resources by annotation, not by the app.kubernetes.io/instance label.
+    # Helm uses that label too, so label tracking could prune Helm-created Secrets.
+    application.resourceTrackingMethod: annotation

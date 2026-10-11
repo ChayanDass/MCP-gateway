@@ -1,0 +1,41 @@
+# Packages the stack chart and pushes it to GitHub Container Registry as an OCI chart,
+# on every push to main that changes a chart. Argo CD deploys from git and does not need this;
+# it gives other clusters a versioned chart to install with `helm install ... oci://...`.
+name: charts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/charts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Build dependencies and package the stack chart
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo add jetstack https://charts.jetstack.io
+          helm dependency build charts/stack
+          helm package charts/stack -d dist
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push the chart
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push dist/*.tgz "oci://ghcr.io/${OWNER}/charts"

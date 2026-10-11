@@ -26,6 +26,8 @@ ingress:
 
 secrets:
   name: store-secrets
+  # false: the Secret is created outside Helm (scripts/bootstrap.sh), e.g. for GitOps.
+  create: true
 
 resources:
   wordpress:

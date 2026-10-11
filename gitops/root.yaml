@@ -1,0 +1,22 @@
+# Root app: Argo CD watches gitops/apps and creates every child app from it.
+# Applied once by scripts/bootstrap.sh. After that, a git push is the deploy.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ChayanDass/MCP-gateway.git
+    targetRevision: main
+    path: gitops/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

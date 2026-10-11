@@ -1,0 +1,30 @@
+# The whole stack from charts/stack, with the production values. Wave 2: after the issuer.
+# Secrets are not in git: scripts/bootstrap.sh creates them in the kube-mcp namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-mcp
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ChayanDass/MCP-gateway.git
+    targetRevision: main
+    path: charts/stack
+    helm:
+      releaseName: kube-mcp
+      valueFiles:
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-mcp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
