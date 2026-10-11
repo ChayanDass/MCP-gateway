@@ -38,7 +38,10 @@ gateway:
 
 mcp:
   store:
-    siteUrl: https://store.13.200.126.173.nip.io
+    # woo-mcp signs its requests with this address. It calls WordPress over plain HTTP
+    # inside the cluster, and WooCommerce checks the signature against the scheme it sees,
+    # so this must be http:// even though the public site is https://.
+    siteUrl: http://store.13.200.126.173.nip.io
 
 ingress:
   ingress:
