@@ -1,12 +1,22 @@
-# Sends the store host to WordPress.
+# Sends the store host (and, when ipRule is on, the bare IP) to WordPress.
+{{- $tls := .Values.ingress.tls }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: store
   labels:
     app.kubernetes.io/part-of: kube-mcp
+  {{- if $tls.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ $tls.clusterIssuer | quote }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if $tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.ingress.store.host | quote }}]
+      secretName: store-tls
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.store.host | quote }}
       http:
@@ -18,3 +28,15 @@ spec:
                 name: {{ .Values.ingress.store.service }}
                 port:
                   name: http
+    {{- if $tls.ipRule }}
+    # No host: requests to the bare IP (self-signed HTTPS) reach the store.
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.ingress.store.service }}
+                port:
+                  name: http
+    {{- end }}

@@ -1,13 +1,23 @@
 # Dashboard hosts. The gateway API, MCP and OAuth paths go to the gateway;
 # everything else goes to the dashboard.
+{{- $tls := .Values.ingress.tls }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: mcp-dashboard
   labels:
     app.kubernetes.io/part-of: kube-mcp
+  {{- if $tls.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ $tls.clusterIssuer | quote }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if $tls.enabled }}
+  tls:
+    - hosts: {{ toJson .Values.ingress.dashboard.hosts }}
+      secretName: dashboard-tls
+  {{- end }}
   rules:
     {{- range .Values.ingress.dashboard.hosts }}
     - host: {{ . | quote }}

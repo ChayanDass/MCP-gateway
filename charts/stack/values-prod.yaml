@@ -1,0 +1,43 @@
+# Production: AWS k3s cluster (see infra/aws/k3s). HTTPS only.
+# Hostnames: nip.io names that point at the server's IP. Replace with your domain later.
+# Each hostname gets a Let's Encrypt certificate (cert-manager, ClusterIssuer letsencrypt-prod).
+# The bare IP gets a self-signed certificate (secret kube-mcp/ip-tls), so browsers warn for it.
+# Use: helm install kube-mcp charts/stack -f charts/stack/values-secrets.yaml -f charts/stack/values-prod.yaml
+
+ingress-nginx:
+  controller:
+    admissionWebhooks:
+      # Off: the validating webhook's certificate kept failing on this cluster.
+      enabled: false
+    extraArgs:
+      default-ssl-certificate: "kube-mcp/ip-tls"
+
+store:
+  siteUrl: https://store.13.200.126.173.nip.io
+  storage:
+    className: local-path
+  # Small nodes: the setup Job's memory request is kept low.
+  resources:
+    setup:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+gateway:
+  publicBaseUrl: https://kube-mcp.13.200.126.173.nip.io
+  storage:
+    className: local-path
+
+mcp:
+  store:
+    siteUrl: https://store.13.200.126.173.nip.io
+
+ingress:
+  ingress:
+    store:
+      host: store.13.200.126.173.nip.io
+    dashboard:
+      hosts: [kube-mcp.13.200.126.173.nip.io]
+    tls:
+      enabled: true
+      clusterIssuer: letsencrypt-prod
+      ipRule: true

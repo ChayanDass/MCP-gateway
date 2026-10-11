@@ -9,3 +9,9 @@ ingress:
     hosts: [localhost, kube-mcp.localtest.me]
     gatewayService: gateway
     dashboardService: dashboard
+  # HTTPS. enabled: serve the hosts over TLS with a cert from clusterIssuer (cert-manager).
+  # ipRule: also serve the bare IP (the default certificate handles it).
+  tls:
+    enabled: false
+    clusterIssuer: ""
+    ipRule: false

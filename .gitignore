@@ -37,3 +37,10 @@ charts/stack/values-secrets.yaml
 
 # Packaged subcharts are rebuilt with `helm dependency build`, never committed
 charts/*/charts/*.tgz
+
+# Terraform: local state, plans and provider cache
+**/.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan

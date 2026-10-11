@@ -1,0 +1,32 @@
+# Development: local Kind cluster. Plain HTTP, *.localtest.me names (resolve to 127.0.0.1).
+# Use: helm install kube-mcp charts/stack -f charts/stack/values-secrets.yaml -f charts/stack/values-dev.yaml
+
+ingress-nginx:
+  controller:
+    admissionWebhooks:
+      enabled: false
+
+store:
+  siteUrl: http://store.localtest.me
+  storage:
+    className: standard
+
+gateway:
+  publicBaseUrl: http://localhost
+  storage:
+    className: standard
+
+mcp:
+  store:
+    siteUrl: http://store.localtest.me
+
+ingress:
+  ingress:
+    store:
+      host: store.localtest.me
+    dashboard:
+      hosts: [localhost, kube-mcp.localtest.me]
+    tls:
+      enabled: false
+      clusterIssuer: ""
+      ipRule: false

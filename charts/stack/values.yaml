@@ -4,6 +4,10 @@
 
 ingress-nginx:
   controller:
+    # Recreate, not RollingUpdate: the controller binds host ports 80 and 443,
+    # so a second pod on the same node could never start.
+    updateStrategy:
+      type: Recreate
     ingressClassResource:
       default: true
     # Binds the controller to the node's host ports (see infra/kind/kind.yaml).
