@@ -3,6 +3,7 @@ import { api } from "./api";
 import { useState } from "react";
 import type { ServerView } from "./api";
 import { navigate } from "./router";
+import { StatusBadge } from "./ui";
 
 // A compact server tile for the list page. Everything else lives on the server's page.
 export function ServerCard({ server: s, providerName, onChanged }: { server: ServerView; providerName: string; onChanged: () => void }) {
@@ -46,10 +47,8 @@ export function ServerCard({ server: s, providerName, onChanged }: { server: Ser
         <span className="tag">{s.authMode === "oauth" ? providerName : "Shared"}</span>
       </div>
       <div className="tile-connection">
-        <div className={`tile-status ${tone}`}>
-          <span className={`dot ${tone}`} />
-          {label}
-        </div>
+        <StatusBadge status={s.status} />
+        <span className="muted small">{label}</span>
         {needsSignIn && s.enabled && (
           <a className="button-link primary small-btn" href={`/api/oauth/server/${s.id}/start`} onClick={(e) => e.stopPropagation()}>
             Connect

@@ -4,6 +4,7 @@ import { Logo } from "./Logo";
 import { navigate } from "./router";
 import type { Provider } from "./ProvidersPanel";
 import { AddServerModal } from "./AddServerModal";
+import { Button, ConfirmDialog } from "./ui";
 
 type Tab = "overview" | "tools" | "settings";
 
@@ -14,6 +15,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const load = useCallback(() => {
     api<ServerView[]>("GET", "/api/servers")
@@ -121,9 +123,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
               <button disabled={busy} onClick={() => act(() => api("PATCH", `/api/servers/${server.id}`, { enabled: !server.enabled }))}>
                 {server.enabled ? "Turn off" : "Turn on"}
               </button>
-              <button className="danger" disabled={busy} onClick={() => window.confirm(`Remove ${server.name}?`) && act(async () => { await api("DELETE", `/api/servers/${server.id}`); navigate("servers"); })}>
-                Remove server
-              </button>
+              <Button variant="danger" disabled={busy} onClick={() => setConfirmRemove(true)}>Remove server</Button>
             </div>
           )}
           {server.status === "unreachable" && server.error && <p className="status-line err">{server.error}</p>}
@@ -200,6 +200,20 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
           }}
         />
       )}
+      <ConfirmDialog
+        open={confirmRemove}
+        title="Remove this server?"
+        body={`${server.name} will be removed from the gateway. Members will lose access to its tools.`}
+        confirmLabel="Remove server"
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          act(async () => {
+            await api("DELETE", `/api/servers/${server.id}`);
+            navigate("servers");
+          });
+        }}
+      />
     </div>
   );
 }

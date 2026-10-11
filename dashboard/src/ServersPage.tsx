@@ -3,6 +3,7 @@ import { api, type ServerView } from "./api";
 import { AddServerModal } from "./AddServerModal";
 import { ServerCard } from "./ServerCard";
 import type { Provider } from "./ProvidersPanel";
+import { EmptyState, Skeleton } from "./ui";
 
 // The MCP servers list page: a summary, then one tile per server. Each tile opens
 // that server's own page.
@@ -47,7 +48,7 @@ export function ServersPage({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       {error && <p className="status-line err">{error}</p>}
-      {!servers && !error && <p className="muted">Loading…</p>}
+      {!servers && !error && <Skeleton lines={4} />}
 
       <div className="tile-grid">
         {servers?.map((s) => <ServerCard key={s.id} server={s} providerName={providerName(s.providerId)} onChanged={load} />)}
