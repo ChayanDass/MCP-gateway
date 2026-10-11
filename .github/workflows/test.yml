@@ -1,0 +1,106 @@
+# Tests for every part of the repo. Runs on every pull request and on pushes to main.
+#   1. Type-check and build the gateway, the WooCommerce MCP server and the dashboard.
+#   2. Lint and render every Helm chart with the dev and prod values.
+#   3. Check the shell scripts.
+#   4. Install the stack on a Kind cluster and check that it comes up (main and manual runs).
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [services/gateway, services/woo-mcp, dashboard]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: ${{ matrix.service }}
+      - name: Build (type-check)
+        run: npm run build
+        working-directory: ${{ matrix.service }}
+
+  charts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Add chart repositories
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+      - name: Lint every chart
+        run: |
+          for c in charts/store charts/mcp charts/gateway charts/ingress; do helm lint "$c"; done
+          helm dependency build charts/stack
+          helm lint charts/stack -f charts/stack/values-dev.yaml
+          helm lint charts/stack -f charts/stack/values-prod.yaml
+      - name: Render with dev and prod values
+        run: |
+          # The example secrets file has placeholders, which is enough to render.
+          helm template kube-mcp charts/stack -f charts/stack/values-secrets.example.yaml -f charts/stack/values-dev.yaml > /tmp/dev.yaml
+          helm template kube-mcp charts/stack -f charts/stack/values-secrets.example.yaml -f charts/stack/values-prod.yaml > /tmp/prod.yaml
+          # Every rendered object must be valid YAML.
+          python3 -c "import yaml,sys; [print(len(list(yaml.safe_load_all(open(f))))) for f in ['/tmp/dev.yaml','/tmp/prod.yaml']]"
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check shell scripts
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          echo "scripts ok"
+
+  cluster:
+    # Full install on a Kind cluster. Only on main, to keep pull requests fast.
+    if: github.event_name != 'pull_request'
+    needs: [services, charts, scripts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with:
+          config: infra/kind/kind.yaml
+          wait: 120s
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Install the stack
+        run: |
+          kubectl label node kube-mcp-control-plane ingress-ready=true --overwrite
+          helm dependency build charts/stack
+          helm install kube-mcp charts/stack -n kube-mcp --create-namespace \
+            -f charts/stack/values-secrets.example.yaml -f charts/stack/values-dev.yaml \
+            --set ingress-nginx.controller.admissionWebhooks.enabled=false \
+            --wait --timeout 25m || {
+              kubectl -n kube-mcp get pods -o wide; kubectl -n kube-mcp describe pods | tail -60; exit 1; }
+      - name: Check the gateway and the store
+        run: |
+          kubectl -n kube-mcp rollout status deploy/gateway --timeout=5m
+          kubectl -n kube-mcp rollout status deploy/woo-mcp --timeout=5m
+          kubectl -n kube-mcp wait --for=condition=complete job/store-setup --timeout=15m
+          curl -sf http://localhost/healthz >/dev/null || (kubectl -n kube-mcp port-forward svc/gateway 18080:8080 & sleep 5; curl -sf http://127.0.0.1:18080/healthz)
