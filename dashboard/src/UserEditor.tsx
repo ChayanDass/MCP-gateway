@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ServerView, type UserView } from "./api";
+import { ConfirmDialog } from "./ui";
 
 type Level = "none" | "read" | "write";
 
@@ -19,6 +20,7 @@ export function UserEditor({ user, isSelf, onChanged, onClose }: { user: UserVie
   const [disabled, setDisabled] = useState(user.disabled);
   const [access, setAccess] = useState<AccessRow[]>([]);
   const [password, setPassword] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -59,12 +61,13 @@ export function UserEditor({ user, isSelf, onChanged, onClose }: { user: UserVie
   }
 
   async function remove() {
-    if (!window.confirm(`Delete ${user.email}? Their keys and audit trail stay in the log, but they can no longer sign in.`)) return;
+    setConfirmDelete(false);
     await run("User deleted.", () => api("DELETE", `/api/users/${user.id}`));
     onClose();
   }
 
   return (
+    <>
     <div className="card">
       <div className="row between">
         <strong>Edit {user.email}</strong>
@@ -149,13 +152,22 @@ export function UserEditor({ user, isSelf, onChanged, onClose }: { user: UserVie
 
       {!isSelf && (
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="danger" onClick={remove} disabled={busy}>
+          <button className="danger" onClick={() => setConfirmDelete(true)} disabled={busy}>
             Delete user
           </button>
         </div>
       )}
       {status && <p className={status.kind === "ok" ? "small" : "error small"}>{status.text}</p>}
     </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete ${user.email}?`}
+        body="Their keys and audit trail stay in the log, but they can no longer sign in."
+        confirmLabel="Delete user"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={remove}
+      />
+    </>
   );
 }
 
