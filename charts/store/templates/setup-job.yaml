@@ -89,6 +89,27 @@ data:
       $W plugin install wordpress-importer --activate
       $W import /var/www/html/wp-content/plugins/woocommerce/sample-data/sample_products.xml --authors=create
     fi
+    # Register the REST key the MCP server uses. Only a hash of the consumer key
+    # is stored, as WooCommerce does itself. Idempotent.
+    $W eval '
+      global $wpdb;
+      $ck = getenv("WOO_CONSUMER_KEY");
+      $cs = getenv("WOO_CONSUMER_SECRET");
+      $table = $wpdb->prefix . "woocommerce_api_keys";
+      $hash = hash_hmac("sha256", $ck, "wc-api");
+      $exists = $wpdb->get_var($wpdb->prepare("SELECT key_id FROM $table WHERE consumer_key = %s", $hash));
+      if (!$exists) {
+        $admin = get_user_by("login", "admin");
+        $wpdb->insert($table, array(
+          "user_id" => $admin ? $admin->ID : 1,
+          "description" => "mcp woo-mcp",
+          "permissions" => "read_write",
+          "consumer_key" => $hash,
+          "consumer_secret" => $cs,
+          "truncated_key" => substr($ck, -7),
+        ));
+      }'
+
     echo "store setup finished: {{ .Values.siteUrl }}"
 ---
 apiVersion: batch/v1
@@ -129,6 +150,10 @@ spec:
               value: wordpress
             - name: WORDPRESS_DB_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: mariadb-password } }
+            - name: WOO_CONSUMER_KEY
+              valueFrom: { secretKeyRef: { name: woo-mcp-credentials, key: consumer-key } }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom: { secretKeyRef: { name: woo-mcp-credentials, key: consumer-secret } }
             - name: SITE_URL
               value: {{ .Values.siteUrl | quote }}
             - name: WP_ADMIN_PASSWORD

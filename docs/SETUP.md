@@ -68,7 +68,7 @@ docker save registry.k8s.io/ingress-nginx/controller:v1.15.1 \
 
 ## 4. Create the secrets file
 
-The stack needs two values that are not in the repo: the WooCommerce REST key and the Google OAuth client ID. Copy the example and fill it in:
+The stack needs one value that is not in the repo: the Google OAuth client ID. The WooCommerce key is generated for you. Copy the example and fill it in:
 
 ```sh
 cp charts/stack/values-secrets.example.yaml charts/stack/values-secrets.yaml
@@ -77,7 +77,6 @@ chmod 600 charts/stack/values-secrets.yaml
 
 Edit `charts/stack/values-secrets.yaml`:
 
-- **`mcp.woo.consumerKey` and `consumerSecret`:** create them in WooCommerce after the store is running (see step 6). On a first install, put placeholders here and fix them in step 6.
 - **`gateway.auth.googleClientId`:** the client ID from Google Cloud Console.
 
 `values-secrets.yaml` is git-ignored. Check with `git check-ignore -v charts/stack/values-secrets.yaml`.
@@ -110,23 +109,18 @@ docker run -d --name kube-mcp-gateway-proxy --restart unless-stopped \
 
 In the Google Cloud Console, add `http://localhost:8080` to the OAuth client's **Authorized JavaScript origins**.
 
-## 6. Create the WooCommerce key
+## 6. WooCommerce key (automatic)
 
-The WooCommerce MCP server needs a REST API key. Create it in WordPress:
+Nothing to do here. The chart generates the WooCommerce REST key into the `woo-mcp-credentials` Secret, and the setup Job registers it in WooCommerce. woo-mcp reads the Secret.
 
-1. Open http://store.localtest.me/wp-admin and sign in as `admin`. The password is in the `store-secrets` Secret:
-   ```sh
-   kubectl -n kube-mcp get secret store-secrets -o jsonpath='{.data.wp-admin-password}' | base64 -d; echo
-   ```
-2. Go to **WooCommerce → Settings → Advanced → REST API → Add key**.
-3. Set **User** to `admin` and **Permissions** to **Read/Write**, then click **Generate API key**.
-4. Copy the **Consumer key** (`ck_...`) and **Consumer secret** (`cs_...`). WooCommerce shows the secret only once.
-
-Put them in `charts/stack/values-secrets.yaml`, then apply the change:
+To check it:
 
 ```sh
-helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml
+kubectl -n kube-mcp get secret woo-mcp-credentials -o jsonpath='{.data.consumer-key}' | base64 -d | cut -c1-6; echo
+kubectl -n kube-mcp rollout status deploy/woo-mcp
 ```
+
+The first command prints the start of the key (`ck_...`). The second confirms woo-mcp is running.
 
 ## 7. Sign in and check
 
@@ -191,7 +185,7 @@ Deleting the namespace also deletes the data volumes, so the store and gateway d
 | `connection reset by peer` during a chart download | Network problem | Run the same command again |
 | Controller pod stuck in `ImagePullBackOff` | Node can't reach `registry.k8s.io` | Load the controller image (step 3) |
 | `x509: certificate signed by unknown authority` on ingress | Admission webhook certificate | Already disabled in `charts/stack/values.yaml` for local use |
-| Install fails: `mcp.woo.consumerKey: set woo.consumerKey` | Key not in the secrets file | Fill it in (step 4 or 6) |
+| woo-mcp stuck in `CreateContainerConfigError` | `woo-mcp-credentials` Secret missing | Run `helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml` |
 | `/shop/` returns 404 | Pretty permalinks not written | Re-run `helm upgrade`; the setup Job writes `.htaccess` |
 | `127.0.0.1` returns 404 | Ingress routes by hostname | Use `store.localtest.me` or `localhost:8080` |
 | Login says `Invalid email or password` | Typed password differs from the Secret | Copy it from step 7 |
@@ -201,7 +195,7 @@ Deleting the namespace also deletes the data volumes, so the store and gateway d
 
 ## Security notes
 
-- The WooCommerce key and the Google client ID are in `charts/stack/values-secrets.yaml` and in Helm's release history. That's fine for a local cluster. For a shared cluster, create the Secrets yourself and reference them from the charts.
+- The WooCommerce key is in the `woo-mcp-credentials` Secret, and the Google client ID is in `charts/stack/values-secrets.yaml`. Both also appear in Helm's release history. That's fine for a local cluster. For a shared cluster, create the Secrets yourself and reference them from the charts.
 - `GOOGLE_ALLOWED_DOMAINS` is empty, so any Google account can sign in. Set it to your company domain before sharing the dashboard with others: `--set-string gateway.auth.googleAllowedDomains=example.com`.
 - The gateway's admin password is generated and kept in `gateway-secrets`. Change it after the first sign-in.
 - `values-secrets.yaml` is git-ignored. Keep it out of commits.
