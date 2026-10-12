@@ -7,7 +7,7 @@ It runs in two places with the same Helm charts:
 - **Local:** a Kind cluster on your machine, for development.
 - **Production-like:** a k3s cluster on two AWS EC2 instances, with HTTPS and GitOps through Argo CD.
 
-Browse the codebase on DeepWiki: [deepwiki.com/ChayanDass/MCP-gateway](https://deepwiki.com/ChayanDass/MCP-gateway)
+Browse the codebase on DeepWiki: [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ChayanDass/MCP-gateway)
 
 ## Contents
 
