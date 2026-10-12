@@ -20,10 +20,30 @@ const woo = new WooClient({
 
 const port = Number(env("PORT", "8080"));
 
+const stamp = () => new Date().toISOString();
+
 // Build a fresh McpServer per request. The server holds no session state, so
 // any gateway replica can serve any call and the pod can be restarted freely.
 function buildServer(): McpServer {
   const server = new McpServer({ name: "woocommerce", version: "0.1.0" });
+
+  // Log each tool call with its arguments, outcome and duration. Wrapping
+  // registerTool covers every tool without touching the tool definitions.
+  const register = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+  server.registerTool = ((name: string, config: unknown, handler: (args: unknown, extra: unknown) => Promise<{ isError?: boolean; content?: { text?: string }[] }>) =>
+    register(name, config, async (args: unknown, extra: unknown) => {
+      const started = Date.now();
+      const input = JSON.stringify(args);
+      try {
+        const result = await handler(args, extra);
+        const detail = result.isError ? `error="${result.content?.[0]?.text ?? ""}"` : "ok";
+        console.log(`${stamp()} tool=${name} ${detail} ${Date.now() - started}ms args=${input}`);
+        return result;
+      } catch (e) {
+        console.log(`${stamp()} tool=${name} threw ${Date.now() - started}ms args=${input} ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
+      }
+    })) as unknown as typeof server.registerTool;
 
   const ok = (data: unknown) => ({
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -154,6 +174,12 @@ app.get(["/healthz", "/readyz"], (_req: Request, res: Response) => {
 // Stateless MCP endpoint: a fresh server and transport per request, so any
 // replica can answer and a restart loses no session.
 app.all("/mcp", async (req: Request, res: Response) => {
+  const started = Date.now();
+  const rpc = Array.isArray(req.body) ? "batch" : (req.body?.method ?? "-");
+  const tool = rpc === "tools/call" ? req.body.params?.name : undefined;
+  console.log(`${stamp()} request ${req.method} rpc=${rpc}${tool ? ` tool=${tool}` : ""} from=${req.ip} agent="${req.get("user-agent") ?? "-"}"`);
+  res.on("finish", () => console.log(`${stamp()} response rpc=${rpc} status=${res.statusCode} ${Date.now() - started}ms`));
+
   const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
