@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "./api";
 import { Logo } from "./Logo";
 import { navigate } from "./router";
+import { ClassBadge, EmptyState, Panel } from "./shared";
 
 interface Overview {
   servers: { total: number; enabled: number; connected: number; system: number };
@@ -25,107 +29,95 @@ export function OverviewPage({ isAdmin }: { isAdmin: boolean }) {
     return () => clearInterval(t);
   }, []);
 
-  if (error) return <p className="error">{error}</p>;
-  if (!data) return <p className="muted">Loading…</p>;
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   const stats = [
-    { label: "Servers connected", value: `${data.servers.connected}/${data.servers.enabled}`, hint: `${data.servers.total} added to the gateway · for you`, tone: "accent", go: "servers" },
-    { label: "Tools available to you", value: String(data.tools), hint: "after permissions", tone: "ok", go: "servers" },
-    { label: "Calls, last 24 h", value: String(data.calls24h), hint: `${data.errors24h} failed · ${data.denied24h} denied`, tone: "neutral", go: "audit" },
+    { label: "Servers connected", value: `${data.servers.connected}/${data.servers.enabled}`, hint: `${data.servers.total} added · for you`, go: "servers" },
+    { label: "Tools available to you", value: String(data.tools), hint: "after permissions", go: "servers" },
+    { label: "Calls, last 24 h", value: String(data.calls24h), hint: `${data.errors24h} failed · ${data.denied24h} denied`, go: "security/audit" },
     isAdmin && data.members
-      ? { label: "Active members", value: String(data.members.active), hint: `${data.members.admins} admin${data.members.admins === 1 ? "" : "s"}`, tone: "neutral", go: "members" }
-      : { label: "Your access", value: "Member", hint: "per-server rules apply", tone: "neutral", go: "members" },
+      ? { label: "Active members", value: String(data.members.active), hint: `${data.members.admins} admin${data.members.admins === 1 ? "" : "s"}`, go: "security/members" }
+      : { label: "Your access", value: "Member", hint: "per-server rules apply", go: "security/members" },
   ];
 
   return (
-    <div className="overview">
-      <div className="stats">
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((s) => (
-          <button key={s.label} className={`stat ${s.tone}`} onClick={() => navigate(s.go)}>
-            <span className="stat-label">{s.label}</span>
-            <span className="stat-value">{s.value}</span>
-            <span className="stat-hint">{s.hint}</span>
-          </button>
+          <Card key={s.label} className="cursor-pointer gap-2 py-5 transition-colors hover:border-primary/50" onClick={() => navigate(s.go)}>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              <div className="text-2xl font-semibold tracking-tight">{s.value}</div>
+              <div className="text-xs text-muted-foreground">{s.hint}</div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      <div className="split">
-        <section className="card">
-          <div className="card-head">
-            <h3>Model in use</h3>
-            {isAdmin && (
-              <button className="ghost-dark small-btn" onClick={() => navigate("model")}>
-                Change
-              </button>
-            )}
-          </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel
+          title="Model in use"
+          actions={isAdmin && <Button variant="outline" size="sm" onClick={() => navigate("settings/model")}>Change</Button>}
+        >
           {!isAdmin ? (
-            <p className="muted">The chat agent uses the team's configured model.</p>
+            <p className="text-sm text-muted-foreground">The chat agent uses the team's configured model.</p>
           ) : data.model ? (
-            <div className="model-row">
+            <div className="flex items-center gap-3">
               <Logo id={data.model.provider === "anthropic" ? "anthropic" : hostProvider(data.model.baseUrl)} size={40} />
-              <div>
-                <div className="strong">{data.model.model}</div>
-                <div className="muted small">{data.model.baseUrl}</div>
+              <div className="min-w-0">
+                <div className="truncate font-medium">{data.model.model}</div>
+                <div className="truncate text-xs text-muted-foreground">{data.model.baseUrl}</div>
               </div>
             </div>
           ) : (
-            <p className="error">No model configured. Chat is disabled.</p>
+            <p className="text-sm text-destructive">No model configured. Chat is disabled.</p>
           )}
-        </section>
+        </Panel>
 
-        <section className="card">
-          <div className="card-head">
-            <h3>Quick actions</h3>
+        <Panel title="Quick actions">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => navigate("clients")}>Connect a client</Button>
+            <Button variant="outline" onClick={() => navigate("chat")}>Open chat</Button>
+            <Button variant="outline" onClick={() => navigate("security/audit")}>View audit log</Button>
           </div>
-          <div className="actions">
-            <button onClick={() => navigate("connect")}>Connect a client</button>
-            <button onClick={() => navigate("chat")}>Open chat</button>
-            <button onClick={() => navigate("audit")}>View audit log</button>
-          </div>
-        </section>
+        </Panel>
       </div>
 
-      <section className="card">
-        <div className="card-head">
-          <h3>Recent activity</h3>
-          <button className="ghost-dark small-btn" onClick={() => navigate("audit")}>
-            See all
-          </button>
-        </div>
+      <Panel title="Recent activity" actions={<Button variant="ghost" size="sm" onClick={() => navigate("security/audit")}>See all</Button>}>
         {data.recent.length === 0 ? (
-          <p className="muted">No tool calls yet. Connect a client or try the chat.</p>
+          <EmptyState title="No tool calls yet" body="Connect a client or try the chat." />
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>User</th>
-                <th>Tool</th>
-                <th>Via</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Tool</TableHead>
+                <TableHead>Via</TableHead>
+                <TableHead>Result</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.recent.map((r, i) => (
-                <tr key={i}>
-                  <td className="muted">{new Date(r.ts).toLocaleTimeString()}</td>
-                  <td>{r.user_email}</td>
-                  <td>
-                    <code>
-                      {r.server_slug}__{r.tool}
-                    </code>
-                  </td>
-                  <td>{r.source}</td>
-                  <td>
-                    <span className={r.outcome === "ok" ? "badge read" : r.outcome === "denied" ? "badge write" : "badge blocked"}>{r.outcome}</span>
-                  </td>
-                </tr>
+                <TableRow key={i}>
+                  <TableCell className="text-muted-foreground">{new Date(r.ts).toLocaleTimeString()}</TableCell>
+                  <TableCell>{r.user_email}</TableCell>
+                  <TableCell>
+                    <code className="text-xs">{r.server_slug}__{r.tool}</code>
+                  </TableCell>
+                  <TableCell>{r.source}</TableCell>
+                  <TableCell>
+                    <ClassBadge value={r.outcome === "ok" ? "allowed" : r.outcome === "denied" ? "denied" : "blocked"} />
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }

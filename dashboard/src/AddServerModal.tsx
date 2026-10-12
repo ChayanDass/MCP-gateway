@@ -1,9 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { api, type ServerView } from "./api";
 import type { Provider } from "./ProvidersPanel";
-import { Modal } from "./Modal";
+import { Modal, Notice } from "./shared";
 import { ProviderFormModal } from "./ProvidersPanel";
 import { Logo } from "./Logo";
+import { cn } from "@/lib/utils";
 
 type Auth = "none" | "oauth";
 
@@ -81,101 +86,125 @@ export function AddServerModal({
 
   return (
     <>
-    <Modal
-      title={editing ? `Edit ${server?.name}` : "Add an MCP server"}
-      subtitle={editing ? "Change the name, address or access settings." : "Choose how members sign in, then give the server's address."}
-      onClose={onClose}
-      wide
-    >
-      <form onSubmit={save}>
-        {!editing && (
-          <>
-            <h4>How members sign in</h4>
-            <div className="choice-row">
-              <button type="button" className={`choice ${auth === "none" ? "on" : ""}`} onClick={() => setAuth("none")}>
-                <strong>Shared</strong>
-                <span className="muted small">No sign-in, or one header credential that everyone shares.</span>
-              </button>
-              <button type="button" className={`choice ${auth === "oauth" ? "on" : ""}`} onClick={() => setAuth("oauth")}>
-                <strong>Browser sign-in</strong>
-                <span className="muted small">Each member connects their own account through a provider.</span>
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="grid">
+      <Modal
+        title={editing ? `Edit ${server?.name}` : "Add an MCP server"}
+        subtitle={editing ? "Change the name, address or access settings." : "Choose how members sign in, then give the server's address."}
+        onClose={onClose}
+        wide
+      >
+        <form onSubmit={save} className="space-y-5">
           {!editing && (
-            <label>
-              Slug
-              <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase() })} pattern="[a-z0-9-]{2,40}" required placeholder="notion" />
+            <div className="space-y-2">
+              <Label>How members sign in</Label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Choice selected={auth === "none"} onClick={() => setAuth("none")} title="Shared" body="No sign-in, or one header credential that everyone shares." />
+                <Choice selected={auth === "oauth"} onClick={() => setAuth("oauth")} title="Browser sign-in" body="Each member connects their own account through a provider." />
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {!editing && (
+              <Field label="Slug">
+                <Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase() })} pattern="[a-z0-9-]{2,40}" required placeholder="notion" />
+              </Field>
+            )}
+            <Field label="Name">
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="URL (Streamable HTTP)">
+                <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://mcp.example.com/mcp" required />
+              </Field>
+            </div>
+          </div>
+
+          {auth === "none" && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Header name (optional)">
+                <Input value={form.authHeader} onChange={(e) => setForm({ ...form, authHeader: e.target.value })} placeholder="Authorization" />
+              </Field>
+              <Field label="Credential (optional)">
+                <Input type="password" value={form.credential} onChange={(e) => setForm({ ...form, credential: e.target.value })} placeholder={editing ? "leave blank to keep" : "Bearer token or header value"} autoComplete="off" />
+              </Field>
+            </div>
+          )}
+
+          {auth === "oauth" && !editing && (
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {providers.map((p) => (
+                  <Choice
+                    key={p.id}
+                    selected={form.providerId === p.id}
+                    onClick={() => setForm({ ...form, providerId: p.id })}
+                    icon={<Logo id={p.slug} size={28} />}
+                    title={p.name}
+                    body={p.hasSecret && p.clientId ? "Ready" : "Missing credentials"}
+                  />
+                ))}
+                <Choice onClick={() => setAddingProvider(true)} title="Add provider" body="Set up a new sign-in service" dashed />
+              </div>
+              {providers.length === 0 && <p className="text-sm text-muted-foreground">No providers yet. Add one to continue.</p>}
+            </div>
+          )}
+
+          {editing && (
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={form.enabled} onCheckedChange={(v) => setForm({ ...form, enabled: v })} />
+              Turned on
             </label>
           )}
-          <label>
-            Name
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          </label>
-          <label className="span2">
-            URL (Streamable HTTP)
-            <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://mcp.example.com/mcp" required />
-          </label>
-        </div>
 
-        {auth === "none" && (
-          <div className="grid">
-            <label>
-              Header name (optional)
-              <input value={form.authHeader} onChange={(e) => setForm({ ...form, authHeader: e.target.value })} placeholder="Authorization" />
-            </label>
-            <label>
-              Credential (optional)
-              <input type="password" value={form.credential} onChange={(e) => setForm({ ...form, credential: e.target.value })} placeholder={editing ? "leave blank to keep" : "Bearer token or header value"} autoComplete="off" />
-            </label>
+          {error && <Notice tone="err">{error}</Notice>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy || (auth === "oauth" && !editing && !form.providerId)}>
+              {busy ? "Saving…" : editing ? "Save changes" : "Add server"}
+            </Button>
           </div>
-        )}
-
-        {auth === "oauth" && !editing && (
-          <>
-            <h4>Provider</h4>
-            <div className="choice-row">
-              {providers.map((p) => (
-                <button key={p.id} type="button" className={`choice ${form.providerId === p.id ? "on" : ""}`} onClick={() => setForm({ ...form, providerId: p.id })}>
-                  <Logo id={p.slug} size={30} />
-                  <strong>{p.name}</strong>
-                  <span className="muted small">{p.hasSecret && p.clientId ? "Ready" : "Missing credentials"}</span>
-                </button>
-              ))}
-              <button type="button" className="choice add-choice" onClick={() => setAddingProvider(true)}>
-                <span className="add-plus">+</span>
-                <strong>Add provider</strong>
-                <span className="muted small">Set up a new sign-in service</span>
-              </button>
-            </div>
-            {providers.length === 0 && <p className="muted small">No providers yet. Add one to continue.</p>}
-          </>
-        )}
-
-        {error && <p className="status-line err">{error}</p>}
-        <div className="row">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary" disabled={busy || (auth === "oauth" && !editing && !form.providerId)}>
-            {busy ? "Saving…" : editing ? "Save changes" : "Add server"}
-          </button>
-        </div>
-      </form>
-    </Modal>
-    {addingProvider && (
-      <ProviderFormModal
-        provider={null}
-        onClose={() => setAddingProvider(false)}
-        onSaved={(slug) => {
-          // Select the new provider once the list refreshes.
-          setAddingProvider(false);
-          onProvidersChanged?.();
-          setPendingSlug(slug);
-        }}
-      />
-    )}
+        </form>
+      </Modal>
+      {addingProvider && (
+        <ProviderFormModal
+          provider={null}
+          onClose={() => setAddingProvider(false)}
+          onSaved={(slug) => {
+            // Select the new provider once the list refreshes.
+            setAddingProvider(false);
+            onProvidersChanged?.();
+            setPendingSlug(slug);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function Choice({ selected, onClick, title, body, icon, dashed }: { selected?: boolean; onClick: () => void; title: string; body: string; icon?: React.ReactNode; dashed?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors hover:border-primary/60",
+        selected && "border-primary bg-accent",
+        dashed && "border-dashed",
+      )}
+    >
+      {icon && <span className="mb-1">{icon}</span>}
+      <span className="font-medium">{title}</span>
+      <span className="text-sm text-muted-foreground">{body}</span>
+    </button>
   );
 }

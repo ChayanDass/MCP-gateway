@@ -1,5 +1,7 @@
+import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Hot-reload dev server for the dashboard. Open http://localhost:5173 and every
 // save updates the page without a reload. API calls go to the gateway in the
@@ -8,7 +10,10 @@ import react from "@vitejs/plugin-react";
 const gateway = "http://localhost:8080";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "src") },
+  },
   server: {
     host: "localhost",
     port: 5173,

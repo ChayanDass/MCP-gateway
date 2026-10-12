@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { applyTheme } from "./theme";
-import "./styles.css";
+import "./index.css";
 
 applyTheme();
 

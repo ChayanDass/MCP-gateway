@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { History, Plus, Send, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { api } from "./api";
 import { navigate } from "./router";
-import { Modal } from "./Modal";
+import { Modal, Notice, Pill } from "./shared";
 
 interface ToolCall {
   name: string;
@@ -20,7 +24,6 @@ interface Message {
   createdAt: string;
   model: string | null;
   toolCalls: ToolCall[];
-  pending?: boolean;
 }
 
 interface ConversationSummary {
@@ -52,7 +55,7 @@ function read(key: string): string | null {
 
 const STARTERS = ["What orders came in today?", "List the products in the store", "Which orders are still open?"];
 
-// Chat with saved conversations. The list on the left is the member's own history.
+// Chat with saved conversations. The member's own history opens from the History button.
 export function ChatPage({ id }: { id: string | null }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,7 +65,6 @@ export function ChatPage({ id }: { id: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
 
   const loadList = useCallback(() => {
     api<ConversationSummary[]>("GET", "/api/chat/conversations").then(setConversations).catch(() => undefined);
@@ -129,7 +131,7 @@ export function ChatPage({ id }: { id: string | null }) {
   }
 
   // New chat is an explicit choice, so the reload memory of the last chat is cleared.
-  async function newChat() {
+  function newChat() {
     store(LAST_KEY, null);
     navigate("chat");
   }
@@ -151,115 +153,111 @@ export function ChatPage({ id }: { id: string | null }) {
     }
   }
 
-  function grow() {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 180)}px`;
-  }
-
   const empty = messages.length === 0 && !busy;
 
   return (
-    <div className="chat-shell">
-      <section className="chat-main">
-        <header className="chat-head">
-          <div className="chat-title">
-            <strong>{id ? title : "New chat"}</strong>
-            {id && <span className="muted small">Saved to your history</span>}
-          </div>
-          <div className="row">
-            <button onClick={() => setHistoryOpen(true)}>History</button>
-            <button className="primary" onClick={newChat}>
-              New chat
-            </button>
-          </div>
-        </header>
-
-        <div className="chat-scroll">
-          {empty && (
-            <div className="chat-empty">
-              <div className="chat-empty-mark">✦</div>
-              <h3>How can I help?</h3>
-              <p className="muted small">Ask in plain language. The agent uses only the tools your account can use, and every call is logged.</p>
-              <div className="chips">
-                {STARTERS.map((s) => (
-                  <button key={s} className="chip" onClick={() => send(s)} disabled={busy}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {messages.map((m) => (
-            <MessageRow key={m.id} m={m} />
-          ))}
-
-          {busy && (
-            <div className="msg assistant">
-              <div className="msg-avatar assistant">AI</div>
-              <div className="msg-body typing">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          )}
-          {error && <p className="status-line err">{error}</p>}
-          <div ref={endRef} />
+    <div className="flex h-[calc(100vh-14rem)] min-h-[28rem] flex-col overflow-hidden rounded-xl border bg-card">
+      <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{id ? title : "New chat"}</div>
+          {id && <div className="text-xs text-muted-foreground">Saved to your history</div>}
         </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
+            <History className="size-4" />
+            History
+          </Button>
+          <Button size="sm" onClick={newChat}>
+            <Plus className="size-4" />
+            New chat
+          </Button>
+        </div>
+      </header>
 
-        <form
-          className="composer"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send(input);
+      <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6">
+        {empty && (
+          <div className="mx-auto flex max-w-lg flex-col items-center gap-3 py-10 text-center">
+            <div className="grid size-11 place-items-center rounded-xl bg-accent text-accent-foreground">
+              <Sparkles className="size-5" />
+            </div>
+            <h3 className="text-lg font-semibold">How can I help?</h3>
+            <p className="text-sm text-muted-foreground">Ask in plain language. The agent uses only the tools your account can use, and every call is logged.</p>
+            <div className="flex flex-wrap justify-center gap-2 pt-2">
+              {STARTERS.map((s) => (
+                <Button key={s} variant="outline" size="sm" className="rounded-full" onClick={() => send(s)} disabled={busy}>
+                  {s}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((m) => (
+          <MessageRow key={m.id} m={m} />
+        ))}
+
+        {busy && (
+          <div className="flex gap-3">
+            <Avatar label="AI" assistant />
+            <div className="flex items-center gap-1 rounded-2xl bg-muted px-4 py-3">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="size-1.5 animate-pulse rounded-full bg-muted-foreground" style={{ animationDelay: `${i * 150}ms` }} />
+              ))}
+            </div>
+          </div>
+        )}
+        {error && <Notice tone="err">{error}</Notice>}
+        <div ref={endRef} />
+      </div>
+
+      <form
+        className="flex items-end gap-2 border-t p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send(input);
+        }}
+      >
+        <Textarea
+          value={input}
+          rows={1}
+          placeholder="Message the agent. Enter to send, Shift+Enter for a new line."
+          className="max-h-44 min-h-10 resize-none"
+          onChange={(e) => {
+            setInput(e.target.value);
+            store(draftKey(id), e.target.value || null);
           }}
-        >
-          <textarea
-            ref={taRef}
-            value={input}
-            rows={1}
-            placeholder="Message the agent. Enter to send, Shift+Enter for a new line."
-            onChange={(e) => {
-              setInput(e.target.value);
-              store(draftKey(id), e.target.value || null);
-              grow();
-            }}
-            onKeyDown={onKey}
-            disabled={busy}
-            aria-label="Message"
-          />
-          <button type="submit" className="primary send" disabled={busy || !input.trim()}>
-            Send
-          </button>
-        </form>
-      </section>
+          onKeyDown={onKey}
+          disabled={busy}
+          aria-label="Message"
+        />
+        <Button type="submit" size="icon" disabled={busy || !input.trim()} aria-label="Send">
+          <Send className="size-4" />
+        </Button>
+      </form>
 
       {historyOpen && (
         <Modal title="Chat history" subtitle="Your saved conversations. Open one to continue it." onClose={() => setHistoryOpen(false)} wide>
-          <div className="history-list">
+          <div className="space-y-2">
             {conversations.map((c) => (
-              <div key={c.id} className={`history-item ${c.id === id ? "on" : ""}`}>
+              <div key={c.id} className={cn("flex items-center gap-3 rounded-lg border p-3", c.id === id && "border-primary bg-accent/50")}>
                 <button
-                  className="history-open"
+                  className="min-w-0 flex-1 text-left"
                   onClick={() => {
                     setHistoryOpen(false);
                     navigate(`chat/${c.id}`);
                   }}
                 >
-                  <strong>{c.title}</strong>
-                  <span className="muted small">
+                  <div className="truncate font-medium">{c.title}</div>
+                  <div className="text-xs text-muted-foreground">
                     {new Date(c.updated_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · {c.message_count} messages
-                  </span>
+                  </div>
                 </button>
-                <button className="small-btn danger" onClick={() => remove(c.id)}>
+                <Button variant="destructive" size="sm" onClick={() => remove(c.id)}>
                   Delete
-                </button>
+                </Button>
               </div>
             ))}
-            {conversations.length === 0 && <p className="muted small">No saved conversations yet. Start one with New chat.</p>}
+            {conversations.length === 0 && <p className="text-sm text-muted-foreground">No saved conversations yet. Start one with New chat.</p>}
           </div>
         </Modal>
       )}
@@ -267,25 +265,33 @@ export function ChatPage({ id }: { id: string | null }) {
   );
 }
 
+function Avatar({ label, assistant }: { label: string; assistant?: boolean }) {
+  return (
+    <div className={cn("grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold", assistant ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+      {label}
+    </div>
+  );
+}
+
 function MessageRow({ m }: { m: Message }) {
   const isUser = m.role === "user";
   return (
-    <div className={`msg ${isUser ? "user" : "assistant"}`}>
-      <div className={`msg-avatar ${isUser ? "user" : "assistant"}`}>{isUser ? "You" : "AI"}</div>
-      <div className="msg-col">
+    <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
+      <Avatar label={isUser ? "You" : "AI"} assistant={!isUser} />
+      <div className={cn("flex min-w-0 max-w-[85%] flex-col gap-1", isUser && "items-end")}>
         {m.toolCalls.length > 0 && <ToolBlock calls={m.toolCalls} />}
         {m.content && (
-          <div className="msg-body">
+          <div className={cn("rounded-2xl px-4 py-2.5 text-sm break-words", isUser ? "rounded-tr-sm bg-primary text-primary-foreground" : "rounded-tl-sm bg-muted")}>
             {isUser ? (
-              <div className="plain">{m.content}</div>
+              <div className="whitespace-pre-wrap">{m.content}</div>
             ) : (
-              <div className="md">
+              <div className="space-y-2 [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-background/60 [&_pre]:p-2 [&_table]:text-xs [&_ul]:list-disc [&_ul]:pl-5">
                 <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>
               </div>
             )}
           </div>
         )}
-        <div className="msg-meta muted small">
+        <div className="text-xs text-muted-foreground">
           {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           {m.model && ` · ${m.model}`}
         </div>
@@ -298,26 +304,26 @@ function MessageRow({ m }: { m: Message }) {
 function ToolBlock({ calls }: { calls: ToolCall[] }) {
   const total = calls.reduce((n, c) => n + (c.durationMs ?? 0), 0);
   return (
-    <details className="tool-block">
-      <summary>
-        <span className="tool-count">
+    <details className="w-full rounded-lg border bg-background text-sm">
+      <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2">
+        <span className="font-medium">
           {calls.length} tool call{calls.length === 1 ? "" : "s"}
         </span>
-        <span className="muted small">{total} ms</span>
+        <span className="text-xs text-muted-foreground">{total} ms</span>
       </summary>
-      <div className="tool-list">
+      <div className="space-y-1 border-t p-2">
         {calls.map((c, i) => (
-          <details key={i} className="tool-item">
-            <summary>
-              <code>{c.name}</code>
-              <span className={`badge ${c.outcome === "ok" ? "read" : c.outcome === "denied" ? "write" : "blocked"}`}>{c.outcome}</span>
-              <span className="muted small">{c.durationMs} ms</span>
+          <details key={i} className="rounded-md border p-2">
+            <summary className="flex cursor-pointer flex-wrap items-center gap-2">
+              <code className="text-xs">{c.name}</code>
+              <Pill tone={c.outcome === "ok" ? "ok" : c.outcome === "denied" ? "warn" : "danger"}>{c.outcome}</Pill>
+              <span className="text-xs text-muted-foreground">{c.durationMs} ms</span>
             </summary>
-            <div className="tool-detail">
-              <div className="tool-label">Arguments</div>
-              <pre>{JSON.stringify(c.args, null, 2)}</pre>
-              <div className="tool-label">Result</div>
-              <pre>{c.result || "(no output)"}</pre>
+            <div className="mt-2 space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Arguments</div>
+              <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">{JSON.stringify(c.args, null, 2)}</pre>
+              <div className="text-xs font-medium text-muted-foreground">Result</div>
+              <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">{c.result || "(no output)"}</pre>
             </div>
           </details>
         ))}

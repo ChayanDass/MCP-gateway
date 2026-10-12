@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 import { api, type UserView } from "./api";
 import { Logo } from "./Logo";
+import { ClassBadge, EmptyState, Notice, Panel, Pill } from "./shared";
 
 type Rule = "inherit" | "allow" | "deny";
 
@@ -23,8 +28,7 @@ interface ServerBlock {
 }
 
 // Per-member tool permissions. Pick a member on the left; each tool gets a rule:
-// inherit (the default), allow, or deny. The result column shows what the member
-// can actually call.
+// default (the default), allow, or deny. The result column shows what the member can call.
 export function ToolPermissionsPage() {
   const [users, setUsers] = useState<UserView[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -67,86 +71,93 @@ export function ToolPermissionsPage() {
   }
 
   return (
-    <div className="split-page">
-      <aside className="people">
-        <div className="client-nav-title">Members</div>
+    <div className="grid gap-6 lg:grid-cols-[16rem_1fr]">
+      <aside className="space-y-2">
+        <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Members</p>
         {users.map((u) => (
-          <button key={u.id} className={`client-tile ${selected === u.id ? "selected" : ""}`} onClick={() => setSelected(u.id)}>
+          <button
+            key={u.id}
+            onClick={() => setSelected(u.id)}
+            className={cn("flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:border-primary/60", selected === u.id && "border-primary bg-accent")}
+          >
             <Logo id={u.role === "admin" ? "custom" : "other"} size={34} />
-            <span className="client-tile-text">
-              <span className="client-tile-name">{u.name}</span>
-              <span className="muted small">{u.email}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{u.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">{u.email}</span>
             </span>
           </button>
         ))}
       </aside>
 
-      <section className="people-main">
-        {error && <p className="status-line err">{error}</p>}
-        {!member && <p className="muted">Choose a member.</p>}
-        {member && member.role === "admin" && (
-          <p className="status-line ok">Admins have every tool. Rules below only apply to members.</p>
-        )}
-        {member && !blocks && <p className="muted">Loading…</p>}
+      <section className="min-w-0 space-y-5">
+        {error && <Notice tone="err">{error}</Notice>}
+        {!member && <EmptyState title="Choose a member" />}
+        {member && member.role === "admin" && <Notice tone="ok">Admins have every tool. Rules below only apply to members.</Notice>}
+        {member && !blocks && <p className="text-sm text-muted-foreground">Loading…</p>}
         {member &&
           blocks?.map((b) => (
-            <div key={b.serverId} className="card">
-              <div className="card-head">
-                <div className="row">
-                  <Logo id={b.slug} size={28} />
-                  <strong>{b.name}</strong>
-                  <span className={b.isSystem ? "badge read" : "badge"}>{b.isSystem ? "system" : "third-party"}</span>
-                  <span className="badge">{b.level === "none" ? "No access" : b.level === "read" ? "Read only" : "Read and write"}</span>
+            <Panel
+              key={b.serverId}
+              title={b.name}
+              actions={
+                <div className="flex items-center gap-2">
+                  <Logo id={b.slug} size={24} />
+                  <Pill tone={b.isSystem ? "ok" : "muted"}>{b.isSystem ? "system" : "third-party"}</Pill>
+                  <Pill tone="muted">{b.level === "none" ? "No access" : b.level === "read" ? "Read only" : "Read and write"}</Pill>
                 </div>
-              </div>
-              {b.level === "none" && <p className="muted small">{member.name} has no access to this server. Grant access under Members first.</p>}
+              }
+            >
+              {b.level === "none" && <p className="text-sm text-muted-foreground">{member.name} has no access to this server. Grant access under Members first.</p>}
               {b.tools.length === 0 ? (
-                <p className="muted small">
+                <p className="text-sm text-muted-foreground">
                   {b.authMode === "oauth" ? "Tools appear here after a member connects this account." : "No tools reported by this server."}
                 </p>
               ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Tool</th>
-                      <th>Class</th>
-                      <th>Rule</th>
-                      <th>Result</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {b.tools.map((t) => (
-                      <tr key={t.name}>
-                        <td>
-                          <code>{t.name}</code>
-                          {t.description && <div className="muted small">{t.description.slice(0, 90)}</div>}
-                        </td>
-                        <td>
-                          <span className={`badge ${t.class}`}>{t.class}</span>
-                        </td>
-                        <td>
-                          <div className="rule-seg" role="group" aria-label={`Rule for ${t.name}`}>
-                            {(["inherit", "allow", "deny"] as Rule[]).map((r) => (
-                              <button
-                                key={r}
-                                className={`${t.rule === r ? "on" : ""} ${r}`}
-                                disabled={busy === `${b.serverId}|${t.name}` || member.role === "admin"}
-                                onClick={() => setRule(b.serverId, t.name, r)}
-                              >
-                                {r === "inherit" ? "Default" : r === "allow" ? "Allow" : "Deny"}
-                              </button>
-                            ))}
-                          </div>
-                        </td>
-                        <td>
-                          <span className={t.allowed ? "badge read" : "badge blocked"}>{t.allowed ? "Allowed" : "Blocked"}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <Card className="overflow-hidden p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Tool</TableHead>
+                        <TableHead>Class</TableHead>
+                        <TableHead>Rule</TableHead>
+                        <TableHead>Result</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {b.tools.map((t) => (
+                        <TableRow key={t.name}>
+                          <TableCell>
+                            <code className="text-xs">{t.name}</code>
+                            {t.description && <div className="text-xs text-muted-foreground">{t.description.slice(0, 90)}</div>}
+                          </TableCell>
+                          <TableCell>
+                            <ClassBadge value={t.class} />
+                          </TableCell>
+                          <TableCell>
+                            <ToggleGroup
+                              type="single"
+                              variant="outline"
+                              size="sm"
+                              value={t.rule}
+                              disabled={busy === `${b.serverId}|${t.name}` || member.role === "admin"}
+                              onValueChange={(v) => v && setRule(b.serverId, t.name, v as Rule)}
+                              aria-label={`Rule for ${t.name}`}
+                            >
+                              <ToggleGroupItem value="inherit">Default</ToggleGroupItem>
+                              <ToggleGroupItem value="allow">Allow</ToggleGroupItem>
+                              <ToggleGroupItem value="deny">Deny</ToggleGroupItem>
+                            </ToggleGroup>
+                          </TableCell>
+                          <TableCell>
+                            <ClassBadge value={t.allowed ? "allowed" : "blocked"} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
               )}
-            </div>
+            </Panel>
           ))}
       </section>
     </div>

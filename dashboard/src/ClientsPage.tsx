@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { api } from "./api";
 import { CLIENTS, copyText, oauthSnippetFor, snippetFor, type ClientId } from "./connect";
 import { Logo } from "./Logo";
+import { EmptyState, Notice, Panel } from "./shared";
 
 type Method = "key" | "oauth";
 
@@ -20,7 +28,7 @@ interface ClientRow {
   expires_at: string;
 }
 
-// Clients for the logged-in member only. Pick a setup from the dropdown: a key you
+// Clients for the logged-in member only. Pick a client, then a setup: a key you
 // create here, or browser sign-in, which needs no key.
 export function ClientsPage({ userId }: { userId: string }) {
   const [method, setMethod] = useState<Method>("oauth");
@@ -73,142 +81,142 @@ export function ClientsPage({ userId }: { userId: string }) {
   const activeKeys = keys.filter((k) => !k.revoked_at);
 
   return (
-    <div className="clients-layout">
-      <aside className="client-nav" aria-label="Clients">
-        <div className="client-nav-title">Choose a client</div>
+    <div className="grid gap-6 lg:grid-cols-[16rem_1fr]">
+      <aside className="space-y-2">
+        <p className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Choose a client</p>
         {CLIENTS.map((c) => (
-          <button key={c.id} className={`client-tile ${client === c.id ? "selected" : ""}`} onClick={() => setClient(c.id)}>
-            <Logo id={c.id} size={38} />
-            <span className="client-tile-text">
-              <span className="client-tile-name">{c.label}</span>
-              <span className="muted small">{CLIENT_HINT[c.id]}</span>
+          <button
+            key={c.id}
+            onClick={() => setClient(c.id)}
+            className={cn("flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:border-primary/60", client === c.id && "border-primary bg-accent")}
+          >
+            <Logo id={c.id} size={34} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{c.label}</span>
+              <span className="block truncate text-xs text-muted-foreground">{CLIENT_HINT[c.id]}</span>
             </span>
           </button>
         ))}
       </aside>
 
-      <div className="client-main">
-        <div className="seg method-seg" role="tablist">
-          <button role="tab" aria-selected={method === "oauth"} className={method === "oauth" ? "seg-on" : ""} onClick={() => setMethod("oauth")}>
-            Browser sign-in
-          </button>
-          <button role="tab" aria-selected={method === "key"} className={method === "key" ? "seg-on" : ""} onClick={() => setMethod("key")}>
-            API key
-          </button>
-        </div>
+      <div className="min-w-0 space-y-5">
+        <Tabs value={method} onValueChange={(v) => setMethod(v as Method)}>
+          <TabsList>
+            <TabsTrigger value="oauth">Browser sign-in</TabsTrigger>
+            <TabsTrigger value="key">API key</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {method === "key" && (
-          <div className="card key-tools">
-            <div className="field-row">
-              <label className="grow">
-                Key label
-                <input placeholder="e.g. laptop" value={label} onChange={(e) => setLabel(e.target.value)} />
-              </label>
-              <button className="primary" onClick={generate}>
-                Generate key
-              </button>
+          <Panel title="Create a key">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-48 flex-1 space-y-2">
+                <Label htmlFor="key-label">Key label</Label>
+                <Input id="key-label" placeholder="e.g. laptop" value={label} onChange={(e) => setLabel(e.target.value)} />
+              </div>
+              <Button onClick={generate}>Generate key</Button>
             </div>
             {newKey && (
-              <div className="new-key">
-                <p className="small">Copy it now. It is shown once.</p>
-                <code className="keybox">{newKey}</code>
+              <div className="space-y-2 rounded-md border border-warning/40 bg-warning-soft p-3">
+                <p className="text-sm">Copy it now. It is shown once.</p>
+                <code className="block break-all rounded bg-background p-2 text-xs">{newKey}</code>
               </div>
             )}
-          </div>
+          </Panel>
         )}
 
-      <div className="instructions">
-        <div className="instructions-head">
-          <span className="instructions-title">{method === "key" ? "Manual setup" : "Browser sign-in"}</span>
-          <span className="muted small">{snippet.title}</span>
-        </div>
-        <ol className="steps">
-          {steps.map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ol>
-        <pre>{snippet.body}</pre>
-        {snippet.note && <p className="small muted">{snippet.note}</p>}
-        <div className="row">
-          <button
-            onClick={async () => {
-              setCopied((await copyText(snippet.body)) ? true : false);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
-      </div>
+        <Panel
+          title={method === "key" ? "Manual setup" : "Browser sign-in"}
+          description={snippet.title}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                setCopied(await copyText(snippet.body));
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          }
+        >
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+            {steps.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+          <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">{snippet.body}</pre>
+          {snippet.note && <p className="text-sm text-muted-foreground">{snippet.note}</p>}
+        </Panel>
 
-      {status && <p className={status.kind === "ok" ? "status-line ok" : "status-line err"}>{status.text}</p>}
+        {status && <Notice tone={status.kind === "ok" ? "ok" : "err"}>{status.text}</Notice>}
 
-      <div className="card">
-        <div className="card-head">
-          <strong>{method === "key" ? "Your keys" : "Your connected clients"}</strong>
-        </div>
-        {method === "key" ? (
-          activeKeys.length === 0 ? (
-            <p className="muted small">You have no active keys.</p>
+        <Panel title={method === "key" ? "Your keys" : "Your connected clients"}>
+          {method === "key" ? (
+            activeKeys.length === 0 ? (
+              <EmptyState title="No active keys" body="Generate a key above to use with a client that needs one." />
+            ) : (
+              <Card className="overflow-hidden p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Label</TableHead>
+                      <TableHead>Key</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {activeKeys.map((k) => (
+                      <TableRow key={k.id}>
+                        <TableCell>{k.label}</TableCell>
+                        <TableCell>
+                          <code className="text-xs">{k.prefix}…</code>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(k.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="destructive" size="sm" onClick={() => revoke(k.id)}>
+                            Revoke
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            )
+          ) : connected.length === 0 ? (
+            <EmptyState title="No connected clients" body="No client is signed in through browser sign-in yet." />
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Label</th>
-                  <th>Key</th>
-                  <th>Created</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {activeKeys.map((k) => (
-                  <tr key={k.id}>
-                    <td>{k.label}</td>
-                    <td>
-                      <code>{k.prefix}…</code>
-                    </td>
-                    <td className="muted">{new Date(k.created_at).toLocaleDateString()}</td>
-                    <td className="actions-cell">
-                      <button className="small-btn danger" onClick={() => revoke(k.id)}>
-                        Revoke
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )
-        ) : connected.length === 0 ? (
-          <p className="muted small">No client is signed in through browser sign-in yet.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Connected</th>
-                <th>Session ends</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {connected.map((c) => (
-                <tr key={c.client_id}>
-                  <td>
-                    <strong>{c.client_name}</strong>
-                  </td>
-                  <td className="muted">{new Date(c.connected_at).toLocaleString()}</td>
-                  <td className="muted">{new Date(c.expires_at).toLocaleDateString()}</td>
-                  <td className="actions-cell">
-                    <button className="small-btn danger" onClick={() => disconnect(c.client_id)}>
-                      Disconnect
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            <Card className="overflow-hidden p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Client</TableHead>
+                    <TableHead>Connected</TableHead>
+                    <TableHead>Session ends</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {connected.map((c) => (
+                    <TableRow key={c.client_id}>
+                      <TableCell className="font-medium">{c.client_name}</TableCell>
+                      <TableCell className="text-muted-foreground">{new Date(c.connected_at).toLocaleString()}</TableCell>
+                      <TableCell className="text-muted-foreground">{new Date(c.expires_at).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="destructive" size="sm" onClick={() => disconnect(c.client_id)}>
+                          Disconnect
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+        </Panel>
       </div>
     </div>
   );

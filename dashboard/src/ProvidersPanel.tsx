@@ -1,7 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "./api";
 import { copyText } from "./connect";
-import { Modal } from "./Modal";
+import { Modal, Notice, Pill } from "./shared";
 
 export interface Provider {
   id: string;
@@ -61,57 +66,68 @@ export function ProviderFormModal({ provider, onSaved, onClose }: { provider: Pr
   }
 
   return (
-    <Modal title={editing ? `Edit ${provider?.name}` : "Add a sign-in provider"} subtitle="Create the app in the provider, then paste its client ID and secret here. You can copy the redirect address after saving." onClose={onClose} wide>
-      <form onSubmit={save}>
-        <div className="grid">
-          <label>
-            Name
-            <input value={form.name} onChange={(e) => set("name", e.target.value)} required placeholder="e.g. Notion" />
-          </label>
-          <label>
-            Slug
-            <input value={form.slug} onChange={(e) => set("slug", e.target.value.toLowerCase())} required disabled={!!editing} pattern="[a-z0-9-]{2,40}" placeholder="notion" />
-          </label>
-          <label className="span2">
-            Authorize URL
-            <input value={form.authorizeUrl} onChange={(e) => set("authorizeUrl", e.target.value)} required placeholder="https://provider.example/oauth/authorize" />
-          </label>
-          <label className="span2">
-            Token URL
-            <input value={form.tokenUrl} onChange={(e) => set("tokenUrl", e.target.value)} required placeholder="https://provider.example/oauth/token" />
-          </label>
-          <label className="span2">
-            Scopes (comma-separated)
-            <input value={form.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="read write" />
-          </label>
-          <label>
-            Client ID
-            <input value={form.clientId} onChange={(e) => set("clientId", e.target.value)} required={!editing} />
-          </label>
-          <label>
-            Client secret
-            <input type="password" value={form.clientSecret} onChange={(e) => set("clientSecret", e.target.value)} required={!editing} placeholder={editing ? "leave blank to keep" : ""} autoComplete="off" />
-          </label>
-          <label>
-            Scope parameter
-            <input value={form.scopeParam} onChange={(e) => set("scopeParam", e.target.value)} placeholder="scope or user_scope" />
-          </label>
-          <label>
-            Token field in the response
-            <input value={form.tokenPath} onChange={(e) => set("tokenPath", e.target.value)} placeholder="access_token" />
-          </label>
+    <Modal
+      title={editing ? `Edit ${provider?.name}` : "Add a sign-in provider"}
+      subtitle="Create the app in the provider, then paste its client ID and secret here. You can copy the redirect address after saving."
+      onClose={onClose}
+      wide
+    >
+      <form onSubmit={save} className="space-y-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="p-name" label="Name">
+            <Input id="p-name" value={form.name} onChange={(e) => set("name", e.target.value)} required placeholder="e.g. Notion" />
+          </Field>
+          <Field id="p-slug" label="Slug">
+            <Input id="p-slug" value={form.slug} onChange={(e) => set("slug", e.target.value.toLowerCase())} required disabled={!!editing} pattern="[a-z0-9-]{2,40}" placeholder="notion" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field id="p-auth" label="Authorize URL">
+              <Input id="p-auth" value={form.authorizeUrl} onChange={(e) => set("authorizeUrl", e.target.value)} required placeholder="https://provider.example/oauth/authorize" />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field id="p-token" label="Token URL">
+              <Input id="p-token" value={form.tokenUrl} onChange={(e) => set("tokenUrl", e.target.value)} required placeholder="https://provider.example/oauth/token" />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field id="p-scopes" label="Scopes (comma-separated)">
+              <Input id="p-scopes" value={form.scopes} onChange={(e) => set("scopes", e.target.value)} placeholder="read write" />
+            </Field>
+          </div>
+          <Field id="p-client" label="Client ID">
+            <Input id="p-client" value={form.clientId} onChange={(e) => set("clientId", e.target.value)} required={!editing} />
+          </Field>
+          <Field id="p-secret" label="Client secret">
+            <Input id="p-secret" type="password" value={form.clientSecret} onChange={(e) => set("clientSecret", e.target.value)} required={!editing} placeholder={editing ? "leave blank to keep" : ""} autoComplete="off" />
+          </Field>
+          <Field id="p-scopeparam" label="Scope parameter">
+            <Input id="p-scopeparam" value={form.scopeParam} onChange={(e) => set("scopeParam", e.target.value)} placeholder="scope or user_scope" />
+          </Field>
+          <Field id="p-tokenpath" label="Token field in the response">
+            <Input id="p-tokenpath" value={form.tokenPath} onChange={(e) => set("tokenPath", e.target.value)} placeholder="access_token" />
+          </Field>
         </div>
-        <label className="row check">
-          <input type="checkbox" checked={form.pkce} onChange={(e) => set("pkce", e.target.checked)} />
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.pkce} onCheckedChange={(v) => set("pkce", v === true)} />
           Use PKCE (turn off if the provider rejects it)
         </label>
-        {error && <p className="status-line err">{error}</p>}
-        <div className="row">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary">{editing ? "Save provider" : "Add provider"}</button>
+        {error && <Notice tone="err">{error}</Notice>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit">{editing ? "Save provider" : "Add provider"}</Button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      {children}
+    </div>
   );
 }
 
@@ -119,8 +135,7 @@ export function ProviderFormModal({ provider, onSaved, onClose }: { provider: Pr
 // and encrypted secret. Lives on its own page under Settings.
 export function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[] | null>(null);
-  const [form, setForm] = useState(EMPTY);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Provider | null>(null);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -129,36 +144,6 @@ export function ProvidersPage() {
   useEffect(() => {
     load();
   }, []);
-
-  function edit(p: Provider) {
-    setEditing(p.slug);
-    setOpen(true);
-    setForm({ ...EMPTY, name: p.name, slug: p.slug, authorizeUrl: p.authorizeUrl, tokenUrl: p.tokenUrl, scopes: p.scopes, scopeParam: p.scopeParam, pkce: p.pkce, tokenPath: p.tokenPath, clientId: p.clientId, clientSecret: "" });
-  }
-
-  function close() {
-    setOpen(false);
-    setEditing(null);
-    setForm(EMPTY);
-  }
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setStatus(null);
-    try {
-      if (editing) {
-        const body: Record<string, unknown> = { ...form };
-        if (!form.clientSecret) delete body.clientSecret;
-        await api("PUT", `/api/oauth-providers/${editing}`, body);
-      } else {
-        await api("POST", "/api/oauth-providers", form);
-      }
-      close();
-      load();
-    } catch (err) {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : "Could not save the provider" });
-    }
-  }
 
   async function remove(p: Provider) {
     if (!window.confirm(`Delete ${p.name}? Servers that use it stop working until you pick another provider.`)) return;
@@ -170,53 +155,68 @@ export function ProvidersPage() {
     }
   }
 
-  const set = (k: keyof typeof EMPTY, v: string | boolean) => setForm({ ...form, [k]: v });
+  function close() {
+    setOpen(false);
+    setEditing(null);
+  }
 
   return (
-    <div className="page">
-      <div className="page-bar">
-        <p className="muted small">Create the app in the provider, then paste its client ID and secret here. Paste the redirect address into the app's settings.</p>
-        <button className="primary" onClick={() => { setEditing(null); setForm(EMPTY); setOpen(true); }}>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">Create the app in the provider, then paste its client ID and secret here. Paste the redirect address into the app's settings.</p>
+        <Button
+          onClick={() => {
+            setEditing(null);
+            setOpen(true);
+          }}
+        >
           Add provider
-        </button>
+        </Button>
       </div>
 
-      {status && <p className={status.kind === "ok" ? "status-line ok" : "status-line err"}>{status.text}</p>}
-      {providers && providers.length === 0 && <p className="muted">No providers yet.</p>}
+      {status && <Notice tone={status.kind === "ok" ? "ok" : "err"}>{status.text}</Notice>}
+      {providers && providers.length === 0 && <p className="text-sm text-muted-foreground">No providers yet.</p>}
 
-      <div className="tile-grid">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {providers?.map((p) => (
-          <div key={p.id} className="provider-tile">
-            <div className="row between">
-              <strong>{p.name}</strong>
-              <span className={`badge ${p.hasSecret && p.clientId ? "read" : "write"}`}>{p.hasSecret && p.clientId ? "Ready" : "Missing credentials"}</span>
-            </div>
-            <div className="muted small">
-              <code>{p.slug}</code> · {p.pkce ? "PKCE" : "no PKCE"} · <code>{p.scopeParam}</code>
-            </div>
-            <div className="redirect-row">
-              <code className="redirect">{p.redirectUri}</code>
-              <button
-                className="small-btn"
-                onClick={async () => {
-                  setCopied((await copyText(p.redirectUri)) ? p.slug : null);
-                  setTimeout(() => setCopied(null), 1500);
-                }}
-              >
-                {copied === p.slug ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <div className="row">
-              <button className="small-btn" onClick={() => edit(p)}>Edit</button>
-              <button className="small-btn danger" onClick={() => remove(p)}>Delete</button>
-            </div>
-          </div>
+          <Card key={p.id} className="gap-3 py-5">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-base">{p.name}</CardTitle>
+              <Pill tone={p.hasSecret && p.clientId ? "ok" : "warn"}>{p.hasSecret && p.clientId ? "Ready" : "Missing credentials"}</Pill>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                <code>{p.slug}</code> · {p.pkce ? "PKCE" : "no PKCE"} · <code>{p.scopeParam}</code>
+              </div>
+              <div className="flex items-center gap-2 rounded-md border bg-muted/50 p-2">
+                <code className="min-w-0 flex-1 truncate text-xs">{p.redirectUri}</code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    setCopied((await copyText(p.redirectUri)) ? p.slug : null);
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                >
+                  {copied === p.slug ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setEditing(p); setOpen(true); }}>
+                  Edit
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => remove(p)}>
+                  Delete
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
       {open && (
         <ProviderFormModal
-          provider={providers?.find((p) => p.slug === editing) ?? null}
+          provider={editing}
           onSaved={() => {
             close();
             load();

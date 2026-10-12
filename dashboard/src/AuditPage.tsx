@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type AuditRow } from "./api";
+import { ClassBadge, Notice } from "./shared";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
 
 export function AuditPage() {
   const [rows, setRows] = useState<AuditRow[]>([]);
@@ -13,38 +16,40 @@ export function AuditPage() {
   }, []);
 
   return (
-    <section>
-      {error && <p className="error">{error}</p>}
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>User</th>
-            <th>Server</th>
-            <th>Tool</th>
-            <th>Via</th>
-            <th>Duration</th>
-            <th>Outcome</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{new Date(r.ts).toLocaleString()}</td>
-              <td>{r.user_email}</td>
-              <td>{r.server_slug}</td>
-              <td>
-                <code>{r.tool}</code>
-              </td>
-              <td>{r.source}</td>
-              <td>{r.duration_ms} ms</td>
-              <td className={r.outcome === "ok" ? "" : "error"} title={r.error ?? ""}>
-                {r.outcome}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <div className="space-y-4">
+      {error && <Notice tone="err">{error}</Notice>}
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Time</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Server</TableHead>
+              <TableHead>Tool</TableHead>
+              <TableHead>Via</TableHead>
+              <TableHead>Duration</TableHead>
+              <TableHead>Outcome</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(r.ts).toLocaleString()}</TableCell>
+                <TableCell>{r.user_email}</TableCell>
+                <TableCell>{r.server_slug}</TableCell>
+                <TableCell>
+                  <code className="text-xs">{r.tool}</code>
+                </TableCell>
+                <TableCell>{r.source}</TableCell>
+                <TableCell className="whitespace-nowrap">{r.duration_ms} ms</TableCell>
+                <TableCell title={r.error ?? ""}>
+                  <ClassBadge value={r.outcome === "ok" ? "allowed" : r.outcome === "denied" ? "denied" : "blocked"} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
   );
 }

@@ -1,8 +1,15 @@
 import { lazy, Suspense, useState } from "react";
-import { Skeleton } from "./ui";
-import { getTheme, setTheme, type ThemeChoice } from "./theme";
+import { ChevronDown, LayoutDashboard, LogOut, Monitor, Moon, MessageSquare, Plug, Server, Settings, Shield, Sparkles, Sun, type LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { api, type Me } from "./api";
+import { getTheme, setTheme, type ThemeChoice } from "./theme";
 import { navigate, useRoute } from "./router";
+import { GatewayMark } from "./Logo";
+import { Loading, PageHeader } from "./shared";
+
 const ServersPage = lazy(() => import("./ServersPage").then((m) => ({ default: m.ServersPage })));
 const ServerDetailPage = lazy(() => import("./ServerDetailPage").then((m) => ({ default: m.ServerDetailPage })));
 const ProvidersPage = lazy(() => import("./ProvidersPanel").then((m) => ({ default: m.ProvidersPage })));
@@ -23,22 +30,22 @@ interface Item {
 interface Group {
   key: string;
   label: string;
-  icon: string;
+  icon: LucideIcon;
   items: Item[];
 }
 
-type Entry = (Item & { icon: string }) | Group;
+type Entry = (Item & { icon: LucideIcon }) | Group;
 
 // Top-level pages and expandable groups. A group opens in place, like GitHub's sidebar.
 const NAV: Entry[] = [
-  { key: "overview", label: "Overview", icon: "⌂" },
-  { key: "servers", label: "MCP servers", icon: "◎" },
-  { key: "clients", label: "Clients", icon: "⇄" },
-  { key: "chat", label: "Chat", icon: "✦" },
+  { key: "overview", label: "Overview", icon: LayoutDashboard },
+  { key: "servers", label: "MCP servers", icon: Server },
+  { key: "clients", label: "Clients", icon: Plug },
+  { key: "chat", label: "Chat", icon: MessageSquare },
   {
     key: "security",
     label: "Security",
-    icon: "◉",
+    icon: Shield,
     items: [
       { key: "security/members", label: "Members", adminOnly: true },
       { key: "security/tools", label: "Tool permissions", adminOnly: true },
@@ -48,7 +55,7 @@ const NAV: Entry[] = [
   {
     key: "settings",
     label: "Settings",
-    icon: "⚙",
+    icon: Settings,
     items: [
       { key: "settings/providers", label: "Sign-in providers", adminOnly: true },
       { key: "settings/model", label: "Model", adminOnly: true },
@@ -100,33 +107,39 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isOpen = (g: Group) => open[g.key] ?? g.key === activeGroup?.key;
 
   const info = TITLES[active] ?? TITLES[current] ?? TITLES.overview;
+  const onServerDetail = route[0] === "servers" && route[1];
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">⬡</span>
-          <div>
-            <div className="brand-name">MCP Gateway</div>
-            <div className="brand-sub">Team tools in one place</div>
+    <div className="min-h-screen bg-background md:grid md:grid-cols-[15rem_1fr]">
+      <aside className="flex flex-col gap-4 border-b bg-sidebar p-4 text-sidebar-foreground md:sticky md:top-0 md:h-screen md:border-r md:border-b-0">
+        <div className="flex items-center gap-3 px-2">
+          <GatewayMark size={32} />
+          <div className="leading-tight">
+            <div className="font-semibold text-foreground">MCP Gateway</div>
+            <div className="text-xs text-muted-foreground">Team tools in one place</div>
           </div>
         </div>
-        <nav className="nav">
+
+        <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Main">
           {visible.map((n) =>
             isGroup(n) ? (
-              <div key={n.key} className="nav-group">
-                <button className={`nav-item nav-parent ${activeGroup?.key === n.key ? "in" : ""}`} aria-expanded={isOpen(n)} onClick={() => setOpen({ ...open, [n.key]: !isOpen(n) })}>
-                  <span className="nav-icon">{n.icon}</span>
-                  <span className="nav-label">{n.label}</span>
-                  <span className={`nav-chev ${isOpen(n) ? "up" : ""}`}>▾</span>
+              <div key={n.key} className="hidden md:block">
+                <button
+                  className={cn(NAV_BTN, activeGroup?.key === n.key && "text-foreground")}
+                  aria-expanded={isOpen(n)}
+                  onClick={() => setOpen({ ...open, [n.key]: !isOpen(n) })}
+                >
+                  <n.icon className="size-4" />
+                  <span className="flex-1 text-left">{n.label}</span>
+                  <ChevronDown className={cn("size-4 transition-transform", isOpen(n) && "rotate-180")} />
                 </button>
                 {isOpen(n) && (
-                  <div className="nav-sub">
+                  <div className="ml-7 mt-1 flex flex-col gap-0.5 border-l pl-3">
                     {n.items.map((i) => (
                       <a
                         key={i.key}
                         href={`#/${i.key}`}
-                        className={active === i.key ? "nav-sub-item active" : "nav-sub-item"}
+                        className={cn("rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-accent", active === i.key ? "font-medium text-foreground" : "text-muted-foreground")}
                         onClick={(e) => {
                           e.preventDefault();
                           navigate(i.key);
@@ -142,40 +155,45 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <a
                 key={n.key}
                 href={`#/${n.key}`}
-                className={active === n.key ? "nav-item active" : "nav-item"}
+                className={cn(NAV_BTN, active === n.key ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground" : "")}
                 onClick={(e) => {
                   e.preventDefault();
                   navigate(n.key);
                 }}
               >
-                <span className="nav-icon">{n.icon}</span>
-                <span className="nav-label">{n.label}</span>
+                <n.icon className="size-4" />
+                <span>{n.label}</span>
               </a>
             ),
           )}
         </nav>
-        <ThemeSwitch />
-        <div className="account">
-          <div className="avatar">{me.name.slice(0, 1).toUpperCase()}</div>
-          <div className="account-text">
-            <div className="account-name">{me.name}</div>
-            <div className="account-role">{me.role}</div>
+
+        <div className="mt-auto space-y-3">
+          <ThemeSwitch />
+          <Separator />
+          <div className="flex items-center gap-3 px-1">
+            <Avatar className="size-8">
+              <AvatarFallback className="bg-primary text-primary-foreground">{me.name.slice(0, 1).toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-foreground">{me.name}</div>
+              <div className="text-xs capitalize text-muted-foreground">{me.role}</div>
+            </div>
+            <Button variant="ghost" size="icon" onClick={logout} title="Sign out" aria-label="Sign out">
+              <LogOut className="size-4" />
+            </Button>
           </div>
-          <button className="ghost small-btn" onClick={logout} title="Sign out">
-            Sign out
-          </button>
         </div>
       </aside>
 
-      <div className="content">
-        <div className="container">
-          <header className="page-head">
-            <h1>{route[0] === "servers" && route[1] ? "MCP servers" : info.title}</h1>
-            <p className="muted">{route[0] === "servers" && route[1] ? "One server, its tools and its settings." : info.hint}</p>
-          </header>
-          <main>
-            <Suspense fallback={<Skeleton lines={5} />}>
-            {route[0] === "servers" && route[1] ? (
+      <main className="min-w-0">
+        <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
+          <PageHeader
+            title={onServerDetail ? "MCP servers" : info.title}
+            hint={onServerDetail ? "One server, its tools and its settings." : info.hint}
+          />
+          <Suspense fallback={<Loading lines={5} />}>
+            {onServerDetail ? (
               <ServerDetailPage id={route[1]} tab={(route[2] as "overview" | "tools" | "settings") || "overview"} isAdmin={isAdmin} />
             ) : (
               <>
@@ -190,28 +208,33 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {active === "settings/model" && isAdmin && <LlmPage />}
               </>
             )}
-            </Suspense>
-          </main>
-          {active !== "chat" && (
-            <button className="fab-chat" onClick={() => navigate("chat")} aria-label="Open the assistant" title="Ask the assistant">
-              <span aria-hidden="true">✦</span>
-              <span className="fab-label">Ask</span>
-            </button>
-          )}
+          </Suspense>
         </div>
-      </div>
+      </main>
+
+      {active !== "chat" && (
+        <Button className="fixed bottom-5 right-5 rounded-full shadow-lg" onClick={() => navigate("chat")} aria-label="Open the assistant">
+          <Sparkles className="size-4" />
+          Ask
+        </Button>
+      )}
     </div>
   );
 }
+
+const NAV_BTN = "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground md:whitespace-normal whitespace-nowrap";
 
 // Light, dark, or system. Cycles on click and shows the current choice.
 function ThemeSwitch() {
   const [choice, setChoice] = useState<ThemeChoice>(getTheme());
   const next: Record<ThemeChoice, ThemeChoice> = { system: "light", light: "dark", dark: "system" };
   const label: Record<ThemeChoice, string> = { system: "Auto", light: "Light", dark: "Dark" };
+  const Icon = choice === "dark" ? Moon : choice === "light" ? Sun : Monitor;
   return (
-    <button
-      className="theme-switch"
+    <Button
+      variant="outline"
+      size="sm"
+      className="w-full justify-start gap-2"
       onClick={() => {
         const n = next[choice];
         setTheme(n);
@@ -220,8 +243,8 @@ function ThemeSwitch() {
       aria-label={`Theme: ${label[choice]}. Click to change.`}
       title="Change theme"
     >
-      <span aria-hidden="true">{choice === "dark" ? "☾" : choice === "light" ? "☀" : "◐"}</span>
-      <span>{label[choice]}</span>
-    </button>
+      <Icon className="size-4" />
+      {label[choice]}
+    </Button>
   );
 }

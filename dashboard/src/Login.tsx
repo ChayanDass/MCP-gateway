@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api, type Me } from "./api";
 import { GatewayMark } from "./Logo";
+import { Notice } from "./shared";
 
 declare global {
   interface Window {
@@ -75,32 +80,38 @@ export function Login({ onLogin }: { onLogin: (me: Me) => void }) {
   }
 
   return (
-    <div className="login-wrap">
-      <div className="login card">
-        <div className="login-brand">
-          <GatewayMark />
-          <h1>MCP Gateway</h1>
-        </div>
-        <p className="sub">Sign in with your team account.</p>
-
-        {googleClientId && <div ref={buttonRef} className="google-slot" />}
-        {googleClientId && <div className="divider"><span>or</span></div>}
-
-        <form className="login-form" onSubmit={submit}>
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
-          </label>
-          <label>
-            Password
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
-          </label>
-          {error && <p className="error small">{error}</p>}
-          <button type="submit" className="primary" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-      </div>
+    <div className="grid min-h-screen place-items-center bg-muted/40 p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="items-center text-center">
+          <GatewayMark size={44} />
+          <CardTitle className="pt-2 text-xl">MCP Gateway</CardTitle>
+          <CardDescription>Sign in with your team account.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {googleClientId && <div ref={buttonRef} className="flex justify-center" />}
+          {googleClientId && (
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              or
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          )}
+          <form className="space-y-4" onSubmit={submit}>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+            </div>
+            {error && <Notice tone="err">{error}</Notice>}
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, type ServerView } from "./api";
+import { AddServerModal } from "./AddServerModal";
 import { Logo } from "./Logo";
 import { navigate } from "./router";
 import type { Provider } from "./ProvidersPanel";
-import { AddServerModal } from "./AddServerModal";
-import { Button, ConfirmDialog } from "./ui";
+import { ClassBadge, ConfirmDialog, Field, Notice, Panel, Pill, type Tone } from "./shared";
 
 type Tab = "overview" | "tools" | "settings";
 
@@ -45,147 +51,149 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
     }
   }
 
-  if (server === undefined) return <p className="muted">Loading…</p>;
+  if (server === undefined) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (server === null) {
     return (
-      <div className="page">
-        <p className="status-line err">This server no longer exists.</p>
-        <button onClick={() => navigate("servers")}>Back to MCP servers</button>
+      <div className="space-y-4">
+        <Notice tone="err">This server no longer exists.</Notice>
+        <Button variant="outline" onClick={() => navigate("servers")}>Back to MCP servers</Button>
       </div>
     );
   }
 
-  const tabs: { key: Tab; label: string; show: boolean }[] = [
-    { key: "overview", label: "Overview", show: true },
-    { key: "tools", label: `Tools (${server.tools.length})`, show: true },
-    { key: "settings", label: "Settings", show: isAdmin },
-  ];
   const providerName = providers.find((p) => p.id === server.providerId)?.name ?? "Browser sign-in";
+  const canSignIn = server.authMode === "oauth" && server.enabled && (server.status === "not_connected" || server.status === "reconnect");
 
   return (
-    <div className="page">
-      <button className="back" onClick={() => navigate("servers")}>
-        ← All MCP servers
-      </button>
-
-      <div className="detail-head">
-        <Logo id={server.slug} size={52} />
-        <div className="detail-title">
-          <h2>{server.name}</h2>
-          <span className="muted small">
-            <code>{server.slug}</code> · {server.authMode === "oauth" ? `Browser sign-in · ${providerName}` : "Shared"}
-            {server.isSystem ? " · system" : ""}
-          </span>
-        </div>
-        <StatusChip server={server} />
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-4">
+        <Button variant="ghost" size="sm" onClick={() => navigate("servers")}>
+          <ArrowLeft className="size-4" />
+          All MCP servers
+        </Button>
       </div>
 
-      <nav className="tabs" role="tablist">
-        {tabs
-          .filter((t) => t.show)
-          .map((t) => (
-            <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "tab on" : "tab"} onClick={() => navigate(`servers/${server.id}/${t.key}`)}>
-              {t.label}
-            </button>
-          ))}
-      </nav>
+      <div className="flex flex-wrap items-center gap-4">
+        <Logo id={server.slug} size={52} />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-xl font-semibold">{server.name}</h2>
+          <p className="text-sm text-muted-foreground">
+            <code className="text-xs">{server.slug}</code> · {server.authMode === "oauth" ? `Browser sign-in · ${providerName}` : "Shared"}
+            {server.isSystem ? " · system" : ""}
+          </p>
+        </div>
+        <Pill tone={chipTone(server)}>{yourConnection(server)}</Pill>
+      </div>
 
-      {error && <p className="status-line err">{error}</p>}
+      <Tabs value={tab} onValueChange={(t) => navigate(`servers/${server.id}/${t}`)}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="tools">Tools ({server.tools.length})</TabsTrigger>
+          {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
+        </TabsList>
+      </Tabs>
+
+      {error && <Notice tone="err">{error}</Notice>}
 
       {tab === "overview" && (
-        <Section title="Overview">
+        <Panel title="Overview">
           <Field label="Address">
-            <code>{server.url}</code>
+            <code className="text-xs">{server.url}</code>
           </Field>
           <Field label="Your connection">{yourConnection(server)}</Field>
           <Field label="Sign-in">{server.authMode === "oauth" ? providerName : server.hasCredential ? `Shared credential in ${server.authHeader ?? "Authorization"}` : "No sign-in"}</Field>
           <Field label="Tools">{server.tools.length} listed</Field>
 
-          <div className="actions">
-            {server.authMode === "oauth" && server.enabled && (server.status === "not_connected" || server.status === "reconnect") && (
-              <a className="button-link primary" href={`/api/oauth/server/${server.id}/start`}>
-                Connect your {server.name} account
-              </a>
+          <div className="flex flex-wrap gap-2 pt-2">
+            {canSignIn && (
+              <Button asChild>
+                <a href={`/api/oauth/server/${server.id}/start`}>Connect your {server.name} account</a>
+              </Button>
             )}
             {server.authMode === "oauth" && server.status === "connected" && (
-              <button className="danger" disabled={busy} onClick={() => act(() => api("DELETE", `/api/oauth/server/${server.id}`))}>
+              <Button variant="outline" disabled={busy} onClick={() => act(() => api("DELETE", `/api/oauth/server/${server.id}`))}>
                 Disconnect your account
-              </button>
+              </Button>
             )}
           </div>
 
           {isAdmin && (
-            <div className="actions">
-              <label className="row check">
-                <input type="checkbox" checked={server.chatEnabled} disabled={busy} onChange={() => act(() => api("PATCH", `/api/servers/${server.id}`, { chatEnabled: !server.chatEnabled }))} />
+            <div className="flex flex-wrap items-center gap-6 border-t pt-4">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={server.chatEnabled} disabled={busy} onCheckedChange={() => act(() => api("PATCH", `/api/servers/${server.id}`, { chatEnabled: !server.chatEnabled }))} />
                 Use in chat agent
               </label>
-              <button disabled={busy} onClick={() => act(() => api("PATCH", `/api/servers/${server.id}`, { enabled: !server.enabled }))}>
-                {server.enabled ? "Turn off" : "Turn on"}
-              </button>
-              <Button variant="danger" disabled={busy} onClick={() => setConfirmRemove(true)}>Remove server</Button>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={server.enabled} disabled={busy} onCheckedChange={() => act(() => api("PATCH", `/api/servers/${server.id}`, { enabled: !server.enabled }))} />
+                {server.enabled ? "Turned on" : "Turned off"}
+              </label>
+              <Button variant="destructive" size="sm" className="ml-auto" disabled={busy} onClick={() => setConfirmRemove(true)}>
+                Remove server
+              </Button>
             </div>
           )}
-          {server.status === "unreachable" && server.error && <p className="status-line err">{server.error}</p>}
-        </Section>
+          {server.status === "unreachable" && server.error && <Notice tone="err">{server.error}</Notice>}
+        </Panel>
       )}
 
       {tab === "tools" && (
-        <Section title="Tools">
+        <Panel title="Tools" description={server.authMode === "oauth" ? undefined : undefined}>
           {server.tools.length === 0 ? (
-            <p className="muted small">{server.authMode === "oauth" ? "Tools appear here after you connect your account." : "This server lists no tools."}</p>
+            <p className="text-sm text-muted-foreground">{server.authMode === "oauth" ? "Tools appear here after you connect your account." : "This server lists no tools."}</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Tool</th>
-                  <th>Type</th>
-                  <th>Rule</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tool</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Rule</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {server.tools.map((t) => (
-                  <tr key={t.name}>
-                    <td>
-                      <code>{t.name}</code>
-                      <div className="muted small">{t.description.replace(/^\[[^\]]*\]\s*/, "").slice(0, 120)}</div>
-                    </td>
-                    <td>
-                      <span className={`badge ${t.class}`}>{t.class}</span>
-                    </td>
-                    <td>
+                  <TableRow key={t.name}>
+                    <TableCell>
+                      <code className="text-xs">{t.name}</code>
+                      <div className="text-xs text-muted-foreground">{t.description.replace(/^\[[^\]]*\]\s*/, "").slice(0, 120)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <ClassBadge value={t.class} />
+                    </TableCell>
+                    <TableCell>
                       {isAdmin ? (
-                        <select
+                        <Select
                           value={t.override}
                           disabled={busy}
-                          onChange={(e) => act(() => api("PUT", `/api/servers/${server.id}/tools`, { tool: t.name.slice(server.slug.length + 2), access: e.target.value }))}
+                          onValueChange={(v) => act(() => api("PUT", `/api/servers/${server.id}/tools`, { tool: t.name.slice(server.slug.length + 2), access: v }))}
                         >
-                          <option value="auto">Automatic</option>
-                          <option value="read">Read</option>
-                          <option value="write">Write</option>
-                          <option value="blocked">Blocked</option>
-                        </select>
+                          <SelectTrigger size="sm" className="w-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Automatic</SelectItem>
+                            <SelectItem value="read">Read</SelectItem>
+                            <SelectItem value="write">Write</SelectItem>
+                            <SelectItem value="blocked">Blocked</SelectItem>
+                          </SelectContent>
+                        </Select>
                       ) : (
-                        <span className="muted small">{t.override === "auto" ? "Automatic" : t.override}</span>
+                        <span className="text-sm text-muted-foreground">{t.override === "auto" ? "Automatic" : t.override}</span>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
-        </Section>
+        </Panel>
       )}
 
       {tab === "settings" && isAdmin && (
-        <Section title="Settings">
-          <p className="muted small">Change the name, address or credential. The sign-in type can't change after creation.</p>
-          <div className="actions">
-            <button className="primary" onClick={() => setEditing(true)}>
-              Edit server
-            </button>
+        <Panel title="Settings" description="Change the name, address or credential. The sign-in type can't change after creation.">
+          <div>
+            <Button onClick={() => setEditing(true)}>Edit server</Button>
           </div>
-        </Section>
+        </Panel>
       )}
 
       {editing && (
@@ -235,30 +243,9 @@ function yourConnection(s: ServerView): string {
   }
 }
 
-function StatusChip({ server }: { server: ServerView }) {
-  const tone = server.status === "connected" ? "ok" : server.status === "not_connected" || server.status === "reconnect" ? "warn" : server.status === "unreachable" ? "err" : "";
-  return (
-    <span className={`status-chip ${tone}`}>
-      <span className={`dot ${tone}`} />
-      {yourConnection(server)}
-    </span>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="card section-card">
-      <h3>{title}</h3>
-      <div className="section-body">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="field">
-      <span className="field-label">{label}</span>
-      <span className="field-value">{children}</span>
-    </div>
-  );
+function chipTone(s: ServerView): Tone {
+  if (s.status === "connected") return "ok";
+  if (s.status === "not_connected" || s.status === "reconnect") return "warn";
+  if (s.status === "unreachable") return "danger";
+  return "muted";
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { Toaster } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
 import { api, ApiError, type Me } from "./api";
 import { Login } from "./Login";
 import { Shell } from "./Shell";
-import { Toaster } from "./toast";
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -22,20 +23,29 @@ export function App() {
 
   useEffect(check, [check]);
 
+  let page;
   if (unreachable) {
-    return (
-      <div className="fatal" role="alert">
-        <div className="fatal-card">
-          <h1>Can't reach the gateway</h1>
-          <p className="muted">The dashboard is running, but the gateway isn't responding. It may be restarting.</p>
-          <div className="fatal-actions">
-            <button className="primary" onClick={check}>Try again</button>
-          </div>
+    page = (
+      <div className="grid min-h-screen place-items-center p-6" role="alert">
+        <div className="max-w-md space-y-3 rounded-lg border bg-card p-6 text-center">
+          <h1 className="text-xl font-semibold">Can't reach the gateway</h1>
+          <p className="text-sm text-muted-foreground">The dashboard is running, but the gateway isn't responding. It may be restarting.</p>
+          <Button onClick={check}>Try again</Button>
         </div>
       </div>
     );
+  } else if (me === undefined) {
+    page = <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+  } else if (me === null) {
+    page = <Login onLogin={setMe} />;
+  } else {
+    page = <Shell me={me} onLogout={() => setMe(null)} />;
   }
-  if (me === undefined) return <p className="muted pad">Loading…</p>;
-  if (me === null) return <><Login onLogin={setMe} /><Toaster /></>;
-  return <><Shell me={me} onLogout={() => setMe(null)} /><Toaster /></>;
+
+  return (
+    <>
+      {page}
+      <Toaster richColors closeButton />
+    </>
+  );
 }
