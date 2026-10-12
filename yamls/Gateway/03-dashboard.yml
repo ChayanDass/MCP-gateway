@@ -1,0 +1,73 @@
+# Dashboard: static web UI served by nginx. The image is built from dashboard/
+# (Dockerfile there) and loaded into kind as dashboard:0.1.0.
+# /api and /mcp are routed to the gateway by the Ingress, not by this container.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: gateway
+  labels:
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+      app.kubernetes.io/part-of: mcp-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dashboard
+        app.kubernetes.io/part-of: mcp-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dashboard
+          image: dashboard:0.3.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: gateway
+  labels:
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/part-of: mcp-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

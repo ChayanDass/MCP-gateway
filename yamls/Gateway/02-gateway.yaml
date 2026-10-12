@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/part-of: mcp-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/part-of: mcp-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: gateway:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: gateway
+              containerPort: 8080
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-secrets
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: "postgres://mcp:$(POSTGRES_PASSWORD)@postgres:5432/mcp-db"
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-secrets
+                  key: gateway-encryption-key
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: admin@example.com
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-secrets
+                  key: bootstrap-admin-password
+            - name: WOO_MCP_URL
+              value: "http://mcp.store.svc.cluster.local:8080/mcp"
+            - name: PUBLIC_BASE_URL
+              value: "http://mcp.localtest.me"
+            - name: GOOGLE_CLIENT_ID
+              value: "763488963092-29kda33fj5n268ftf8sf2fe1k0ce03rm.apps.googleusercontent.com"
+          livenessProbe:
+            httpGet:
+               path: /healthz
+               port: gateway
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: gateway
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+
+--- 
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: mcp-gateway
+  ports:
+    - name: gateway
+      port: 8080
+      targetPort: gateway

@@ -1,0 +1,69 @@
+# woo-mcp: the MCP server that exposes the store's WooCommerce REST API as tools.
+# Image: build with docker, then load it into the kind node (see the README steps).
+# Labels must match the wordpress-from-ingress-and-woo-mcp NetworkPolicy in 05-networkpolicies.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woo-mcp
+  namespace: store
+  labels:
+    app.kubernetes.io/name: woo-mcp
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: woo-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: woo-mcp
+        app.kubernetes.io/part-of: mcp-gateway
+    spec:
+      containers:
+        - name: woo-mcp
+          image: woo-mcp:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: WOO_BASE_URL
+              value: http://wordpress/wp-json/wc/v3
+            - name: WOO_HOME_URL
+              value: http://store.localtest.me
+            - name: WOO_CONSUMER_KEY
+              valueFrom: { secretKeyRef: { name: woo-mcp-credentials, key: consumer-key } }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom: { secretKeyRef: { name: woo-mcp-credentials, key: consumer-secret } }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 300m, memory: 192Mi }
+---
+# ClusterIP only: the MCP endpoint has no login, so it is reached with port-forward, not the ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: woo-mcp
+  namespace: store
+  labels:
+    app.kubernetes.io/name: woo-mcp
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: woo-mcp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

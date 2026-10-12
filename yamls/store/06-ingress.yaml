@@ -1,0 +1,22 @@
+# Public entry point for the store. Requires an ingress controller with the
+# nginx ingress class installed.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: store
+  namespace: store
+  labels:
+    app.kubernetes.io/part-of: woocommerce-store
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: store.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress
+                port:
+                  name: http

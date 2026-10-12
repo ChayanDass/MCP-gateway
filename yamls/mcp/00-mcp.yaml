@@ -1,0 +1,96 @@
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: mcp
+#   labels:
+#     name: mcp
+#     app.kubernetes.io/part-of: mcp
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp
+  namespace: store
+  labels:
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: mcp-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp
+        app.kubernetes.io/part-of: mcp-gateway
+    spec:
+      containers:
+        - name: mcp
+          image: woo-mcp:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mcp
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: WOO_HOME_URL
+              value: http://store.localtest.me
+            - name: WOO_BASE_URL
+              value: http://wordpress/wp-json/wc/v3
+            - name: WOO_MCP_STORE_URL
+              value: "https://store.localtest.me"
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: woo-mcp-credentials
+                  key: consumer-key
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: woo-mcp-credentials
+                  key: consumer-secret
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 192Mi
+        
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp
+  namespace: store
+  labels:
+    app.kubernetes.io/name: mcp
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/part-of: mcp-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: mcp-gateway
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: mcp
+    
+

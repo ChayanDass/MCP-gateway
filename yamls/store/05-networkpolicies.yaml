@@ -1,0 +1,52 @@
+# The store database is reachable only from WordPress and the setup Job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb-from-store-only
+  namespace: store
+  labels:
+    app.kubernetes.io/part-of: woocommerce-store
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mariadb
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: wordpress
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: setup
+      ports:
+        - port: 3306
+---
+# WordPress is reached by the ingress controller and by the woo-mcp server
+# (the REST API). Nothing else can reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wordpress-from-ingress-and-woo-mcp
+  namespace: store
+  labels:
+    app.kubernetes.io/part-of: woocommerce-store
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wordpress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # The ingress controller, wherever it runs.
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+        # woo-mcp server. Its namespace and labels must match your MCP manifests.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: mcp-gateway
+              app.kubernetes.io/name: mcp
+      ports:
+        - port: 80
