@@ -28,7 +28,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          image: gateway:0.2.4
+          image: gateway:0.3.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: gateway

@@ -1,3 +1,4 @@
+import { recordToolCall } from "./metrics.js";
 import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { pool } from "./db.js";
 import { decrypt } from "./crypto.js";
@@ -130,6 +131,7 @@ export async function invokeTool(
 }
 
 async function audit(ctx: InvokeContext, slug: string, tool: string, durationMs: number, outcome: string, error: string | null) {
+  recordToolCall(slug, outcome, durationMs);
   await pool.query(
     `INSERT INTO audit_log (user_id, user_email, server_slug, tool, source, duration_ms, outcome, error)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

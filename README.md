@@ -308,8 +308,11 @@ The threat model lists the open gaps, including what a member with *Manage membe
 | Security hardening: SSRF checks, encrypted credentials, non-root containers, default-deny network policies | `ssrf.ts`, `crypto.ts`, the manifests and charts, [docs/NETWORKING.md](docs/NETWORKING.md) |
 | Production on AWS with GitOps | `infra/aws/k3s`, `gitops/`, `charts/stack/values-prod.yaml` |
 | Upgrades and rollback with Helm and Argo CD | Upgrades and rollback, below |
+| Tool discovery for large tool lists | `services/gateway/src/mcp.ts`: when a member has more than `TOOL_DISCOVERY_THRESHOLD` tools (default 30), `/mcp` offers `kmcp__search_tools` and `kmcp__call_tool` instead of the full list |
+| Rate limit per key on `/mcp` | `services/gateway/src/ratelimit.ts`: `RATE_LIMIT_PER_MINUTE` (default 120), per replica; refused calls get HTTP 429 |
+| Metrics: tool calls, outcomes, latency, rate limits, upstream health | `GET /metrics` on the gateway, Prometheus text format. It is not routed by the ingress, so only pods inside the cluster can scrape it |
 
-Not built yet: multi-store provisioning, search-based tool discovery for large catalogues, hosted MCP servers from container images, rate limits per user or key, and per-server metrics.
+Not built yet: multi-store provisioning, and hosted MCP servers deployed from container images.
 
 ## Upgrades and rollback
 

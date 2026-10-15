@@ -1,3 +1,4 @@
+import { renderMetrics } from "./metrics.js";
 import Fastify from "fastify";
 import { config } from "./config.js";
 import { hashPassword } from "./crypto.js";
@@ -38,6 +39,12 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024, trustProxy: true });
   app.get("/healthz", async () => "ok");
+  // Metrics for in-cluster scraping. The ingress doesn't route this path.
+  app.get("/metrics", async (_req, reply) => {
+    const servers = await upstreams.loadServers();
+    const status = servers.map((sv) => ({ slug: sv.slug, status: upstreams.status(sv.id).status }));
+    return reply.type("text/plain; version=0.0.4").send(renderMetrics(status));
+  });
   app.get("/readyz", async () => {
     await pool.query("SELECT 1");
     return "ok";

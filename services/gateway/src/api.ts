@@ -1,3 +1,5 @@
+import { takeToken } from "./ratelimit.js";
+import { recordRateLimited } from "./metrics.js";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -79,6 +81,13 @@ export function registerApi(app: FastifyInstance): void {
   app.all("/mcp", async (req, reply) => {
     const user = await identityFromBearer(req.headers.authorization);
     if (user && !can(user, "mcp.use")) return reply.code(403).send({ error: "Your role can't connect MCP clients." });
+    if (user) {
+      const limit = takeToken(user.id, config.rateLimitPerMinute);
+      if (!limit.ok) {
+        recordRateLimited("mcp");
+        return reply.code(429).header("Retry-After", String(limit.retryAfter)).send({ error: "Too many requests. Try again shortly." });
+      }
+    }
     if (!user) {
       // The MCP authorization spec: point the client at the metadata so it can log in.
       return reply

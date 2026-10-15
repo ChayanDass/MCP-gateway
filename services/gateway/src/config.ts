@@ -29,6 +29,11 @@ export const config = {
   upstreamListTimeoutMs: Number(process.env.UPSTREAM_LIST_TIMEOUT_MS ?? 15000),
   // How often the background health loop re-lists each enabled upstream.
   healthIntervalMs: Number(process.env.HEALTH_INTERVAL_MS ?? 15000),
+  // Calls per key (or per member, for session users) per minute on /mcp.
+  rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE ?? 120),
+  // When one member can see more tools than this, /mcp offers two meta tools
+  // (search and call) instead of the full list, so the model's context stays small.
+  toolDiscoveryThreshold: Number(process.env.TOOL_DISCOVERY_THRESHOLD ?? 30),
   // Extra hostnames allowed for upstreams beyond the default SSRF rules
   // (comma separated). Used for in-cluster services in production if needed.
   upstreamHostAllowlist: (process.env.UPSTREAM_HOST_ALLOWLIST ?? "")

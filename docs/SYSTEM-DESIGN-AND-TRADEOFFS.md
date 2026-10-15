@@ -63,6 +63,9 @@ The same decision function serves the tool-permissions page, so the page shows w
 - **Connections** are cached per server and credential. A changed credential opens a new connection, and a dead one is dropped.
 - **Chat** stops after 8 tool steps, and each tool result is cut to 3,000 characters, so a loop or a large result can't exhaust it.
 - **Login** is throttled: 10 failed attempts per client address in 15 minutes.
+- **Rate limit:** `/mcp` allows 120 requests per minute per key by default (`RATE_LIMIT_PER_MINUTE`). The count is kept per replica, so with N replicas the real limit can be up to N times higher.
+- **Tool discovery:** when a member can see more than 30 tools (`TOOL_DISCOVERY_THRESHOLD`), `/mcp` lists two meta tools instead: `kmcp__search_tools` and `kmcp__call_tool`. The model searches, then calls the tool it found. Each call still goes through the same permission check, and search only returns tools the member can use.
+- **Metrics:** each audited call updates counters for its server and outcome, latency, rate-limit refusals and upstream health. They are served at `/metrics` inside the cluster.
 
 ## Kubernetes layout
 
