@@ -29,7 +29,6 @@ spec:
         {{- include "mcp.labels" . | nindent 8 }}
         {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 8 }}
     spec:
-      serviceAccountName: gateway
       securityContext:
         runAsNonRoot: true
         seccompProfile: { type: RuntimeDefault }

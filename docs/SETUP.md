@@ -101,7 +101,6 @@ kubectl -n kube-mcp rollout status deploy/woo-mcp --timeout=240s
 
 kubectl apply -f yamls/Gateway/01-postgres.yaml
 kubectl -n kube-mcp rollout status statefulset/postgres --timeout=300s
-kubectl apply -f yamls/Gateway/06-provisioner-rbac.yaml
 kubectl apply -f yamls/Gateway/05-networkpolicies.yaml
 kubectl apply -f yamls/Gateway/02-gateway.yaml
 kubectl -n kube-mcp rollout status deploy/gateway --timeout=300s

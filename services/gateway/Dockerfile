@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
 COPY src ./src
-RUN npm run build && cp src/stores/setup.sh dist/stores/setup.sh && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
 WORKDIR /app

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { ChevronDown, LayoutDashboard, LogOut, Monitor, Moon, MessageSquare, Plug, Server, Settings, Shield, Sparkles, Store, Sun, type LucideIcon } from "lucide-react";
+import { ChevronDown, LayoutDashboard, LogOut, Monitor, Moon, MessageSquare, Plug, Server, Settings, Shield, Sparkles, Sun, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -15,7 +15,6 @@ const ServerDetailPage = lazy(() => import("./ServerDetailPage").then((m) => ({ 
 const ProvidersPage = lazy(() => import("./ProvidersPanel").then((m) => ({ default: m.ProvidersPage })));
 const MembersPage = lazy(() => import("./MembersPage").then((m) => ({ default: m.MembersPage })));
 const RolesPage = lazy(() => import("./RolesPage").then((m) => ({ default: m.RolesPage })));
-const StoresPage = lazy(() => import("./StoresPage").then((m) => ({ default: m.StoresPage })));
 const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
 const ChatPage = lazy(() => import("./ChatPage").then((m) => ({ default: m.ChatPage })));
 const ClientsPage = lazy(() => import("./ClientsPage").then((m) => ({ default: m.ClientsPage })));
@@ -42,7 +41,6 @@ type Entry = (Item & { icon: LucideIcon }) | Group;
 const NAV: Entry[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "servers", label: "MCP servers", icon: Server },
-  { key: "stores", label: "Stores", icon: Store, perm: "stores.manage" },
   { key: "clients", label: "Clients", icon: Plug, perm: "mcp.use" },
   { key: "chat", label: "Chat", icon: MessageSquare, perm: "chat.use" },
   {
@@ -82,7 +80,6 @@ const ALIASES: Record<string, string> = {
 const TITLES: Record<string, { title: string; hint: string }> = {
   overview: { title: "Overview", hint: "Live status of the gateway, your tools and recent activity." },
   servers: { title: "MCP servers", hint: "Every server the gateway connects to, and whether you can use it." },
-  stores: { title: "Stores", hint: "WooCommerce stores on the cluster. Each one is connected to the gateway automatically." },
   clients: { title: "Clients", hint: "Connect Claude Code, Cursor, VS Code, Codex or any MCP client, with a key or browser sign-in." },
   chat: { title: "Chat", hint: "Ask in plain language. The agent uses the tools your account can use." },
   "security/members": { title: "Members", hint: "Create members, choose their role, and give or revoke their access." },
@@ -204,7 +201,6 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <>
                 {active === "overview" && <OverviewPage me={me} />}
                 {active === "servers" && <ServersPage canManage={can(me, "servers.manage")} />}
-                {active === "stores" && pageAllowed("stores") && <StoresPage />}
                 {active === "clients" && pageAllowed("clients") && <ClientsPage userId={me.id} />}
                 {active === "chat" && pageAllowed("chat") && <ChatPage id={route[1] ?? null} />}
                 {active === "security/members" && pageAllowed("security/members") && <MembersPage me={me} />}

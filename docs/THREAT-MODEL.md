@@ -141,5 +141,4 @@ An admin can change any setting, read the audit log and reset passwords. That's 
 6. Shared server credentials give every member with access the same upstream reach.
 7. A member who can manage members or roles can grant permissions they don't hold.
 8. The audit log can be edited by anyone with database access.
-9. The gateway's service account can create and delete namespaces and most namespaced resources cluster-wide (`yamls/Gateway/06-provisioner-rbac.yaml`). A compromised gateway pod could therefore affect every namespace, not only the stores it created.
-10. The WordPress admin password controls the whole store.
+9. The WordPress admin password controls the whole store.

@@ -61,7 +61,7 @@ function isSecure(): boolean {
 }
 
 // Attach the current user, or reply 401/403. Returns null when the reply was sent.
-export async function currentUser(req: FastifyRequest, reply: FastifyReply, need?: string | string[]): Promise<Identity | null> {
+async function currentUser(req: FastifyRequest, reply: FastifyReply, need?: string | string[]): Promise<Identity | null> {
   const user = await identityFromSession(req.raw);
   if (!user) {
     reply.code(401).send({ error: "Not signed in" });

@@ -309,11 +309,10 @@ The threat model lists the open gaps, including what a member with *Manage membe
 | Production on AWS with GitOps | `infra/aws/k3s`, `gitops/`, `charts/stack/values-prod.yaml` |
 | Upgrades and rollback with Helm and Argo CD | Upgrades and rollback, below |
 | Tool discovery for large tool lists | `services/gateway/src/mcp.ts`: when a member has more than `TOOL_DISCOVERY_THRESHOLD` tools (default 30), `/mcp` offers `kmcp__search_tools` and `kmcp__call_tool` instead of the full list |
-| Multi-store provisioning: create and delete WooCommerce stores from the dashboard, each in its own namespace with its own database, secrets, volumes, ingress and MCP server | The Stores page, `services/gateway/src/stores/`; see [docs/SYSTEM-DESIGN-AND-TRADEOFFS.md](docs/SYSTEM-DESIGN-AND-TRADEOFFS.md) |
 | Rate limit per key on `/mcp` | `services/gateway/src/ratelimit.ts`: `RATE_LIMIT_PER_MINUTE` (default 120), per replica; refused calls get HTTP 429 |
 | Metrics: tool calls, outcomes, latency, rate limits, upstream health | `GET /metrics` on the gateway, Prometheus text format. It is not routed by the ingress, so only pods inside the cluster can scrape it |
 
-Not built yet: hosted MCP servers deployed from container images.
+Not built yet: multi-store provisioning, and hosted MCP servers deployed from container images.
 
 ## Upgrades and rollback
 

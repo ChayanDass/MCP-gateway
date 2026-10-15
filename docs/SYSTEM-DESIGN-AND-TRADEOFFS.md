@@ -67,27 +67,6 @@ The same decision function serves the tool-permissions page, so the page shows w
 - **Tool discovery:** when a member can see more than 30 tools (`TOOL_DISCOVERY_THRESHOLD`), `/mcp` lists two meta tools instead: `kmcp__search_tools` and `kmcp__call_tool`. The model searches, then calls the tool it found. Each call still goes through the same permission check, and search only returns tools the member can use.
 - **Metrics:** each audited call updates counters for its server and outcome, latency, rate-limit refusals and upstream health. They are served at `/metrics` inside the cluster.
 
-## Multi-store provisioning
-
-Each store is its own WooCommerce install in its own namespace, `store-<slug>`. The dashboard's **Stores** page creates and deletes them.
-
-**Flow:**
-1. `POST /api/stores` writes a row in `stores` with status `provisioning` and returns at once. The address is `<slug>.<STORE_BASE_DOMAIN>`.
-2. The provisioner, a loop in the gateway that checks every 5 seconds, picks up unfinished rows. It applies the store's objects with server-side apply, so each step can run again without changing anything. The objects are the namespace, a ResourceQuota and LimitRange, secrets, network policies, MariaDB, WordPress, the setup job, woo-mcp and the ingress (`stores/objects.ts`).
-3. Passwords and the WooCommerce key are generated once and stored encrypted, so a retry reuses them.
-4. When MariaDB, WordPress, woo-mcp and the setup job are ready, the provisioner registers the store's MCP server in the gateway as `store-<slug>` and marks the store `ready`.
-5. Deleting marks the store `deleting`. The provisioner removes the MCP registration, then the namespace, which removes the database, volumes and secrets. The row goes last.
-
-**Recovery:** the state lives in Postgres, not in memory. If the gateway restarts mid-way, the next loop resumes each store. A store that doesn't become ready within `STORE_PROVISION_TIMEOUT_MS` (20 minutes by default) is marked `failed` with the reason. Retry recreates the setup job and continues.
-
-**Guardrails:** each namespace has a ResourceQuota (1.5 CPU and 1.5 GiB requested, 2.5 GiB limit, 12 pods, 12 GiB of storage) and a LimitRange. A user can own at most `MAX_STORES_PER_USER` stores (3 by default).
-
-**Isolation:** each namespace denies ingress by default. Its MCP server accepts calls only from the gateway, and its own WordPress only. Its database accepts only its own WordPress and setup job. The gateway may reach any managed namespace's MCP server, and no store's MCP server may reach another store's WordPress or database. Tested on Calico.
-
-**Tool names** carry the store: `store-acme-outlet-3f1a__list_orders`. A chat question that compares two stores calls each store's tools by name.
-
-**Trade-off:** provisioning uses a ClusterRole that the gateway's service account holds, because it creates namespaces. That is the broadest permission in the stack. The ClusterRole lists only the resource kinds the provisioner uses. A narrower design would have a separate provisioner component, with a Role bound in each namespace.
-
 ## Kubernetes layout
 
 The local cluster (`yamls/`) uses three namespaces. The AWS cluster (`charts/stack`) puts everything in one, `kube-mcp`.
