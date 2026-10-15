@@ -4,13 +4,17 @@ The store is configured with WP-CLI and WooCommerce's own commands and options.
 No custom code is used. Run the commands inside the WordPress pod as `www-data`:
 
 ```sh
-POD=$(kubectl get pod -n kube-mcp -l app.kubernetes.io/component=wordpress -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -it -n kube-mcp $POD -c wordpress -- \
+POD=$(kubectl get pod -n store -l app.kubernetes.io/name=wordpress -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it -n store $POD -c wordpress -- \
   runuser -u www-data -- php /usr/local/bin/wp --path=/var/www/html <command>
 ```
 
-WP-CLI is not in the WordPress image. Copy the official `wp-cli.phar` to
-`/usr/local/bin/wp` in the pod first (see the README).
+WP-CLI is not in the WordPress image. Copy the `wp-cli.phar` file in the repository root to the pod first:
+
+```sh
+kubectl -n store cp .wp-cli.phar $POD:/usr/local/bin/wp -c wordpress
+kubectl -n store exec $POD -c wordpress -- chmod 755 /usr/local/bin/wp
+```
 
 ## 1. WordPress
 

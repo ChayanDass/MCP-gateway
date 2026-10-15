@@ -26,8 +26,16 @@ spec:
         app.kubernetes.io/name: woo-mcp
         app.kubernetes.io/part-of: mcp-gateway
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: mcp
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           image: woo-mcp:0.1.0
           imagePullPolicy: IfNotPresent
           ports:

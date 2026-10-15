@@ -22,9 +22,10 @@ Browse the codebase on DeepWiki: [![Ask DeepWiki](https://deepwiki.com/badge.svg
 9. [Connect an external MCP client](#connect-an-external-mcp-client)
 10. [Add and manage MCP servers](#add-and-manage-mcp-servers)
 11. [Permissions, keys and audit](#permissions-keys-and-audit)
-12. [Upgrades and rollback](#upgrades-and-rollback)
-13. [Troubleshooting](#troubleshooting)
-14. [More documentation](#more-documentation)
+12. [What is built beyond the core](#what-is-built-beyond-the-core)
+13. [Upgrades and rollback](#upgrades-and-rollback)
+14. [Troubleshooting](#troubleshooting)
+15. [More documentation](#more-documentation)
 
 ## What is in the repo
 
@@ -44,7 +45,8 @@ Browse the codebase on DeepWiki: [![Ask DeepWiki](https://deepwiki.com/badge.svg
 | `gitops` | Argo CD applications: the root app, cert-manager, the ClusterIssuer and the stack |
 | `scripts/init.sh` | One-command local setup |
 | `scripts/bootstrap.sh` | One-time setup for a GitOps cluster: secrets, certificate, Argo CD |
-| `docs/` | Setup guide, store setup steps, roadmap |
+| `yamls/` | Plain Kubernetes manifests for the local Kind cluster: store, MCP server, gateway, dashboard, ingress and network policies |
+| `docs/` | Setup, store steps, networking, system design and tradeoffs, threat model |
 | `.github/workflows` | CI: tests, image builds, chart publishing |
 
 ## How the system fits together
@@ -97,7 +99,7 @@ The server has an Elastic IP, `13.200.126.173`. The worker's public address can 
 - Ports 6443, 8472 (VXLAN) and 10250 (kubelet): only between the two nodes.
 
 **Inside the cluster:** every component has a NetworkPolicy:
-- The gateway and dashboard accept traffic only from the ingress controller.
+- The gateway accepts traffic from the ingress controller and the dashboard. The dashboard accepts traffic only from the ingress controller and makes no outbound calls.
 - The WooCommerce MCP server accepts traffic only from the gateway.
 - The gateway's Postgres accepts traffic only from the gateway.
 - MariaDB accepts traffic only from WordPress and the setup job.
@@ -106,6 +108,8 @@ The server has an Elastic IP, `13.200.126.173`. The worker's public address can 
 **Argo CD:** it has no public address. Reach it with a port-forward (see [Run it on AWS](#run-it-on-aws)).
 
 ## Passwords and secrets
+
+The commands below use the AWS and Helm namespace, `kube-mcp`. On the local Kind cluster the secrets are in `store` (store-secrets, woo-mcp-credentials) and `gateway` (gateway-secrets).
 
 Nothing secret is in git. Passwords are generated once and stored in Kubernetes Secrets. Helm, the bootstrap script and Argo CD never regenerate them, so the databases keep working across upgrades.
 
@@ -155,19 +159,13 @@ If a connection shows *Reconnect*, the provider's token has expired or was revok
 
 ## Run it locally
 
-Prerequisites: Docker, `kind`, `kubectl`, and `helm` 3. Ports 80 and 8443 must be free.
+Local development uses Kind with Calico, so the NetworkPolicies are enforced, and the plain manifests in `yamls/`. The full steps, including building and loading the images and creating the secrets, are in [docs/SETUP.md](docs/SETUP.md).
 
-```sh
-./scripts/init.sh
-```
-
-The script creates the Kind cluster, asks for the Google client ID, installs the stack with one Helm command, waits for the store setup, and prints the addresses.
-
-Then open:
+When it's running, open:
 - Store: `http://store.localtest.me`
 - Dashboard: `http://localhost`, signing in as `admin@example.com`
 
-The manual steps and the full local guide are in [docs/SETUP.md](docs/SETUP.md).
+The same stack is also packaged as the Helm charts in `charts/stack`, which AWS uses. `./scripts/init.sh` installs that package locally. It was last checked before the roles and permissions change, so verify it before you rely on it.
 
 ## Run it on AWS
 
@@ -232,12 +230,15 @@ The chat model is set in **Settings → Model**. It can be any OpenAI-compatible
 
 ### Use the dashboard
 
-- **Overview:** server health, recent calls and errors.
-- **MCP servers:** a card per server, with its status and tool count. Open a server to see its tools and settings.
-- **Clients:** your gateway address and key, with copy buttons and a config snippet for each client.
-- **Security:** members, per-member tool permissions, and the audit log.
+- **Overview:** server status, recent calls and errors, and the model in use.
+- **MCP servers:** a card per server, with its status and tool count. Open one to see its tools and, with *Set up MCP servers*, its settings.
+- **Clients:** your keys and the setup for each client. Create a key here for an MCP client; the key is shown once.
+- **Chat:** ask in plain language. The agent calls tools as you, and each call is audited under your account.
+- **Security:** members, roles and permissions, per-tool rules, and the audit log.
 - **Settings:** sign-in providers and the chat model.
 - **Theme:** the sidebar switch cycles light, dark and system. Your choice is saved in the browser.
+
+Each page shows only what your role allows. The server checks the same permissions on every request.
 
 ## Connect an external MCP client
 
@@ -256,7 +257,7 @@ The client sees every tool your account may call. Tools you can't use are left o
 
 ## Add and manage MCP servers
 
-In the dashboard, go to **MCP servers → Add MCP server**, and enter a name, a slug, and the URL of a Streamable HTTP server. Choose either:
+In the dashboard, go to **MCP servers → Add MCP server** (needs the *Set up MCP servers* permission), and enter a name, a slug, and the URL of a Streamable HTTP server. Choose either:
 - **Shared:** an optional header or bearer credential, used by the gateway for everyone.
 - **Browser sign-in:** each member connects with their own account. See [Upstream sign-in](#upstream-sign-in-github-slack-and-other-oauth-servers).
 
@@ -270,13 +271,45 @@ The servers set up now are WooCommerce, GitHub and Slack (per-member sign-in), a
 
 ## Permissions, keys and audit
 
-- **Roles:** an admin manages servers, members and settings. A member uses the tools they have been given.
+**Permissions are granted through roles.** Each role is a named set of permissions, and each member has one role. The full list is in `services/gateway/src/permissions.ts`:
+
+| Permission | Lets a member |
+|---|---|
+| Manage members | Create, edit, revoke and delete members, and set their role, server access and password |
+| Manage roles | Create and edit roles |
+| Set tool permissions | Allow or block individual tools, per member |
+| Set up MCP servers | Add, edit, turn off and remove servers |
+| Set up sign-in providers | Configure providers for upstream OAuth servers |
+| Set up the model | Choose the chat model |
+| Use every server | Skip per-server grants |
+| See everyone's audit log | See all audit entries, not only their own |
+| Use the chat agent | Ask questions in the dashboard |
+| Connect MCP clients | Create keys for MCP clients |
+
+Two roles are built in. **Admin** has every permission and can't be edited or deleted. **Member** can use chat and MCP clients, and gets server access from an admin. Admins create custom roles under **Security → Roles & permissions**.
+
 - **Server access:** each member gets *none*, *read* or *write* for each server. For WooCommerce, read covers listing products and orders, and write adds product creation and order status changes.
-- **Per-tool rules:** an admin can allow or deny individual tools for one member. Deny always wins.
-- **Keys:** each member has their own API keys. A key can be revoked at any time, and the next call is rejected.
-- **Audit log:** every tool call records the user, the server, the tool, the time, the duration and the outcome. Failed sign-ins and denied calls are recorded too.
+- **Per-tool rules:** an admin can set a tool to *default*, *allow* or *deny* for one member. Deny always wins. **Tool permissions** shows the result for each tool, with the reason, from the same check the gateway uses.
+- **Keys:** a member creates and revokes their own keys under **Clients**. Keys are for MCP clients only; the dashboard signs in with a session and needs no key. A revoked key is rejected on the next call.
+- **Audit log:** every tool call records the user, the server, the tool, the time, the duration and the outcome. Denied calls and failed sign-ins are recorded too.
 
 The gateway never sends a member's key or the upstream credentials to upstream servers. Upstream calls use the server's own credential, or the member's own OAuth token for browser-sign-in servers.
+
+The threat model lists the open gaps, including what a member with *Manage members* can currently grant: see [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
+
+## What is built beyond the core
+
+| Feature | Where to find it |
+|---|---|
+| Tool permissions with reasons, per member and per tool | Security → Tool permissions; `services/gateway/src/access.ts` |
+| Custom roles and a permission registry | Security → Roles & permissions; `services/gateway/src/permissions.ts` |
+| OAuth for MCP clients (browser sign-in, PKCE, rotating refresh tokens) | `services/gateway/src/oauth-server.ts` |
+| Upstream OAuth per member (GitHub, Slack) | Settings → Sign-in providers |
+| Security hardening: SSRF checks, encrypted credentials, non-root containers, default-deny network policies | `ssrf.ts`, `crypto.ts`, the manifests and charts, [docs/NETWORKING.md](docs/NETWORKING.md) |
+| Production on AWS with GitOps | `infra/aws/k3s`, `gitops/`, `charts/stack/values-prod.yaml` |
+| Upgrades and rollback with Helm and Argo CD | Upgrades and rollback, below |
+
+Not built yet: multi-store provisioning, search-based tool discovery for large catalogues, hosted MCP servers from container images, rate limits per user or key, and per-server metrics.
 
 ## Upgrades and rollback
 
@@ -296,7 +329,7 @@ Helm keeps the generated passwords, so an upgrade or rollback doesn't break the 
 |---|---|---|
 | Store or dashboard unreachable locally | Kind not running, or port 80 in use | `kind get clusters`; free port 80 |
 | Dashboard shows "Can't reach the gateway" | The gateway pod is restarting | Wait a minute, then *Try again* |
-| WooCommerce tools say "Invalid signature" | woo-mcp signs with the wrong address | The signing address must be `http://` (see `charts/stack/values-prod.yaml`) |
+| WooCommerce tools say "Invalid signature" | The gateway signs with the store's public address, `WOO_HOME_URL`, and it doesn't match | Set `WOO_HOME_URL` to the store's address (for example `http://store.localtest.me`), then restart woo-mcp |
 | Google sign-in shows `origin_mismatch` | The dashboard address isn't in the OAuth client | Add it under *Authorized JavaScript origins* |
 | A provider sign-in shows `redirect_uri_mismatch` | The callback URL in the provider doesn't match | Use `<dashboard address>/api/oauth/<slug>/callback` |
 | A provider sign-in shows `insufficient scopes` | The provider has no scopes | Set the scopes in *Sign-in providers*, then reconnect |

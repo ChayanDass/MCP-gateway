@@ -1,192 +1,162 @@
-# Setup guide: local Kubernetes (Kind)
+# Local setup: Kind with Calico
 
-The whole stack installs with one Helm command, from the chart in `charts/stack`:
+This runs the whole stack on one machine, using the plain manifests in `yamls/`. The cluster uses Calico, so the NetworkPolicies are enforced. kind's default networking doesn't enforce them.
 
-```sh
-helm install kube-mcp charts/stack -n kube-mcp --create-namespace -f charts/stack/values-secrets.yaml
-```
+The same design is packaged as Helm charts in `charts/`, which are what AWS deploys. See [Helm alternative](#helm-alternative) at the end.
 
-Before that command you need a Kind cluster, the three MCP images loaded into it, and one secrets file. The steps below cover those.
+## What runs where
 
-## What gets installed
+| Namespace | Workloads | Manifests | Reached at |
+|---|---|---|---|
+| `ingress-nginx` | ingress controller | `yamls/ingress/00-ingress-nginx-kind.yaml` | ports 80 and 443 on your machine |
+| `store` | WordPress, MariaDB, store setup Job, woo-mcp | `yamls/store/`, `yamls/mcp/00-mcp.yaml` | `http://store.localtest.me` |
+| `gateway` | gateway, dashboard, Postgres | `yamls/Gateway/` | `http://localhost` and `http://kube-mcp.localtest.me` |
 
-| Part | Source | Address |
-|---|---|---|
-| Ingress controller (ingress-nginx 4.15.1) | `charts/stack` dependency | ports 80 and 8443 on your machine |
-| Store: WordPress, WooCommerce, MariaDB, setup Job | `charts/store` | http://store.localtest.me |
-| WooCommerce MCP server (`woo-mcp`) | `charts/mcp` | in-cluster only |
-| Gateway, dashboard, Postgres | `charts/gateway` | http://localhost |
-| Ingress rules for the store and dashboard | `charts/ingress` | — |
-
-Everything runs in the `kube-mcp` namespace. `*.localtest.me` resolves to `127.0.0.1`, so no `/etc/hosts` edits are needed.
+`*.localtest.me` is public DNS that resolves to `127.0.0.1`, so no `/etc/hosts` edits are needed.
 
 ## 1. Prerequisites
 
-Install Docker, `kind`, `kubectl`, `helm` 3, and `git`. Check them:
+Docker, `kind`, `kubectl`, and `openssl`. Ports **80**, **443** and **8443** must be free.
+
+## 2. Create the cluster with Calico
 
 ```sh
-docker version --format '{{.Server.Version}}'
-kind version
-kubectl version --client
-helm version --short
+kind create cluster --config infra/kind/kind-calico.yaml
+kubectl apply -f infra/kind/calico-v3.32.2.yaml
+kubectl -n kube-system rollout status ds/calico-node --timeout=300s
+kubectl wait --for=condition=Ready node --all --timeout=300s
 ```
 
-Keep ports **80** and **8443** free on your machine.
+`kind-calico.yaml` turns off kind's default network plugin. `calico-v3.32.2.yaml` is the Calico manifest, saved in the repo. `infra/kind/kind.yaml` is the older config for the default plugin; it doesn't enforce NetworkPolicy.
 
-## 2. Create the cluster
+## 3. Build and load the images
 
-```sh
-kind create cluster --config infra/kind/kind.yaml
-```
-
-This creates the node with the `ingress-ready=true` label, which the ingress controller needs. The config maps host port 80 into the cluster.
-
-## 3. Load the MCP images
-
-The store uses public images. The three MCP images come from this repository. The Kind node can't see images on your Docker daemon, so build them and load them:
+The node can't pull the locally built images, so build them and load them into the node. The `docker save | cat` form is needed when Docker is installed as a snap, since snap Docker can't write to `/tmp`.
 
 ```sh
-docker build -t kube-mcp/woo-mcp:0.1.0 services/woo-mcp
-docker build -t kube-mcp/gateway:0.1.0 services/gateway
-docker build -t kube-mcp/dashboard:0.1.0 dashboard
+docker build --provenance=false --sbom=false -t woo-mcp:0.1.0 services/woo-mcp
+docker build --provenance=false --sbom=false -t gateway:0.2.4 services/gateway
+docker build --provenance=false --sbom=false -t dashboard:0.8.1 dashboard
 
-for n in woo-mcp gateway dashboard; do
-  docker save kube-mcp/$n:0.1.0 \
-    | docker exec -i kube-mcp-control-plane ctr -n k8s.io images import --all-platforms -
+for img in woo-mcp:0.1.0 gateway:0.2.4 dashboard:0.8.1; do
+  docker save --platform linux/amd64 $img | cat > /tmp/load.tar
+  cat /tmp/load.tar | docker exec -i kube-mcp-control-plane ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
 done
+rm -f /tmp/load.tar
 ```
 
-If `ctr` prints `content digest ... not found`, ignore it. The image still loads.
+The tags must match the `image:` lines in the manifests. If you build a new version, change the tag in the manifest too. Reusing a tag keeps the old image on the node, because the pull policy is `IfNotPresent`.
 
-The ingress controller image also has to be on the node. Pull it on your machine and load it the same way, because the node often can't reach `registry.k8s.io`:
+The ingress controller image is pulled from `registry.k8s.io` by the node itself. If the node can't reach it, pull it on the host and load it the same way.
+
+## 4. Namespaces, secrets, then workloads
+
+Create the secrets first, because the workloads read them. The values are random. The store values must match what the setup Job registers with WooCommerce.
 
 ```sh
-docker pull registry.k8s.io/ingress-nginx/controller:v1.15.1
-docker save registry.k8s.io/ingress-nginx/controller:v1.15.1 \
-  | docker exec -i kube-mcp-control-plane ctr -n k8s.io images import --all-platforms -
+kubectl apply -f yamls/store/00-namespace.yaml
+kubectl apply -f yamls/Gateway/00-namespace.yaml
+
+rnd() { openssl rand -hex "$1"; }
+
+kubectl -n store create secret generic store-secrets \
+  --from-literal=mariadb-root-password="$(rnd 16)" \
+  --from-literal=mariadb-password="$(rnd 16)" \
+  --from-literal=wp-admin-password="$(rnd 16)"
+
+kubectl -n store create secret generic woo-mcp-credentials \
+  --from-literal=consumer-key="ck_$(rnd 20)" \
+  --from-literal=consumer-secret="cs_$(rnd 20)"
+
+kubectl -n gateway create secret generic gateway-secrets \
+  --from-literal=postgres-password="$(rnd 24)" \
+  --from-literal=gateway-encryption-key="$(openssl rand -base64 32)" \
+  --from-literal=bootstrap-admin-password="$(rnd 16)"
 ```
 
-## 4. Create the secrets file
+Do not apply `yamls/store/01-secrets.yaml` as it is. It holds `CHANGE_ME` placeholders for reference. Keep the generated values somewhere private: the gateway encryption key is needed to read stored upstream credentials later.
 
-The stack needs one value that is not in the repo: the Google OAuth client ID. The WooCommerce key is generated for you. Copy the example and fill it in:
+Apply the ingress controller and the store:
 
 ```sh
-cp charts/stack/values-secrets.example.yaml charts/stack/values-secrets.yaml
-chmod 600 charts/stack/values-secrets.yaml
+kubectl apply -f yamls/ingress/00-ingress-nginx-kind.yaml
+kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=300s
+
+kubectl apply -f yamls/store/02-mariadb.yaml
+kubectl -n store rollout status statefulset/mariadb --timeout=300s
+kubectl apply -f yamls/store/03-wordpress.yaml
+kubectl -n store rollout status deploy/wordpress --timeout=600s
+kubectl apply -f yamls/store/04-setup.yaml
+kubectl -n store wait --for=condition=complete job/store-setup --timeout=15m
+kubectl apply -f yamls/store/05-networkpolicies.yaml -f yamls/store/06-ingress.yaml
 ```
 
-Edit `charts/stack/values-secrets.yaml`:
+The setup Job installs WordPress and WooCommerce, loads the sample products, and registers the WooCommerce key. It runs once. To run it again, delete it first with `kubectl -n store delete job store-setup`.
 
-- **`gateway.auth.googleClientId`:** the client ID from Google Cloud Console.
-
-`values-secrets.yaml` is git-ignored. Check with `git check-ignore -v charts/stack/values-secrets.yaml`.
-
-## 5. Install the stack
+Then the MCP server, the gateway and the dashboard:
 
 ```sh
-helm install kube-mcp charts/stack -n kube-mcp --create-namespace \
-  -f charts/stack/values-secrets.yaml
+kubectl apply -f yamls/mcp/00-mcp.yaml
+kubectl -n store rollout status deploy/mcp --timeout=180s
+
+kubectl apply -f yamls/Gateway/01-postgres.yaml
+kubectl -n gateway rollout status statefulset/postgres --timeout=300s
+kubectl apply -f yamls/Gateway/02-gateway.yaml
+kubectl -n gateway rollout status deploy/gateway --timeout=240s
+kubectl apply -f yamls/Gateway/03-dashboard.yml
+kubectl -n gateway rollout status deploy/dashboard --timeout=240s
+kubectl apply -f yamls/Gateway/04-ingress.yaml -f yamls/Gateway/05-networkpolicies.yaml
 ```
 
-This is the only Helm command you need. It installs the ingress controller, the store, the WooCommerce MCP server, the gateway, the dashboard and the ingress rules, in one release.
+The gateway's `DATABASE_URL` and the Postgres `POSTGRES_DB` must name the same database. The manifests use `mcp-db` for the database and `mcp` for the user.
 
-Wait for the store's setup Job to finish. It installs WordPress and WooCommerce, the sample products, and the store settings:
-
-```sh
-kubectl -n kube-mcp wait --for=condition=complete job/store-setup --timeout=15m
-kubectl -n kube-mcp get pods
-```
-
-Every pod should be `Running`, except the setup Job, which shows `Completed`.
-
-In the Google Cloud Console, add `http://localhost` to the OAuth client's **Authorized JavaScript origins**.
-
-## 6. WooCommerce key (automatic)
-
-Nothing to do here. The chart generates the WooCommerce REST key into the `woo-mcp-credentials` Secret, and the setup Job registers it in WooCommerce. woo-mcp reads the Secret.
-
-To check it:
+## 5. Check it
 
 ```sh
-kubectl -n kube-mcp get secret woo-mcp-credentials -o jsonpath='{.data.consumer-key}' | base64 -d | cut -c1-6; echo
-kubectl -n kube-mcp rollout status deploy/woo-mcp
-```
+kubectl get pods -A | grep -vE "Running|Completed" || echo "all pods are running"
 
-The first command prints the start of the key (`ck_...`). The second confirms woo-mcp is running.
-
-## 7. Sign in and check
-
-Open http://localhost and sign in:
-
-- **Email:** `admin@example.com`
-- **Password:**
-  ```sh
-  kubectl -n kube-mcp get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo
-  ```
-
-Check the endpoints:
-
-```sh
 curl -s -o /dev/null -w "dashboard       %{http_code}\n" http://localhost/
-curl -s -o /dev/null -w "gateway health  %{http_code}\n" http://localhost/healthz
+curl -s -o /dev/null -w "gateway ready   %{http_code}\n" http://localhost/readyz
 curl -s -o /dev/null -w "store           %{http_code}\n" http://store.localtest.me/shop/
 ```
 
-Expected: `200` for all three.
+Expected: `200` for all three. Then sign in at `http://localhost`:
 
-To check the WooCommerce tools from inside the cluster, call `tools/list` on `woo-mcp` from the gateway pod. The output lists the five tools:
+- **Email:** `admin@example.com`, the bootstrap admin in `yamls/Gateway/02-gateway.yaml`.
+- **Password:** `kubectl -n gateway get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo`
 
-```sh
-kubectl -n kube-mcp exec deploy/gateway -- node -e '
-fetch("http://woo-mcp:8080/mcp", {method:"POST", headers:{"content-type":"application/json",accept:"application/json, text/event-stream"},
- body: JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/list",params:{}})})
- .then(r=>r.text()).then(t=>console.log(t.slice(0,200)))'
-```
-
-## Changing things later
-
-Edit the values or the code, then run one of these:
+Check the policies with a pod that is not allowed through. From the `default` namespace it should time out, and from the gateway it should connect:
 
 ```sh
-# values or chart changes
-helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml
-
-# after changing a service's source code: rebuild, load, and restart it
-docker build -t kube-mcp/gateway:0.1.0 services/gateway
-docker save kube-mcp/gateway:0.1.0 | docker exec -i kube-mcp-control-plane ctr -n k8s.io images import --all-platforms -
-kubectl -n kube-mcp rollout restart deploy/gateway
+kubectl -n default run np-test --image=woo-mcp:0.1.0 --image-pull-policy=IfNotPresent --restart=Never --rm -i --quiet --command -- \
+  sh -c 'nc -z -w3 wordpress.store.svc.cluster.local 80 && echo ALLOWED || echo BLOCKED'
 ```
 
-Helm keeps the generated passwords and the encryption key on upgrade, so existing data stays readable.
+## 6. Changing things later
 
-## Removing everything
+- **Code change:** rebuild the image with a new tag, load it (step 3), set the new tag in the manifest, then `kubectl apply` and check the rollout.
+- **Manifest change:** edit the file and `kubectl apply -f` it. Secrets are not touched by re-applying the workload manifests.
+- **Reset:** `kind delete cluster --name kube-mcp` removes everything, including the store and gateway data.
+
+## Helm alternative
+
+The charts in `charts/stack` install the same stack in one release, with `charts/stack/values-dev.yaml` for local use and `values-prod.yaml` for AWS. The local Helm path was last checked before the roles and permissions change, so verify it before relying on it:
 
 ```sh
-helm uninstall kube-mcp -n kube-mcp
-kubectl delete namespace kube-mcp
-kind delete cluster --name kube-mcp
-docker rm -f kube-mcp-gateway-proxy
+helm install kube-mcp charts/stack -n kube-mcp --create-namespace -f charts/stack/values-secrets.yaml -f charts/stack/values-dev.yaml
 ```
 
-Deleting the namespace also deletes the data volumes, so the store and gateway data are gone.
+`charts/stack/values-secrets.example.yaml` lists the one value that isn't generated: the Google OAuth client ID.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `connection reset by peer` during a chart download | Network problem | Run the same command again |
-| Controller pod stuck in `ImagePullBackOff` | Node can't reach `registry.k8s.io` | Load the controller image (step 3) |
-| `x509: certificate signed by unknown authority` on ingress | Admission webhook certificate | Already disabled in `charts/stack/values.yaml` for local use |
-| woo-mcp stuck in `CreateContainerConfigError` | `woo-mcp-credentials` Secret missing | Run `helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml` |
-| `/shop/` returns 404 | Pretty permalinks not written | Re-run `helm upgrade`; the setup Job writes `.htaccess` |
-| `127.0.0.1` returns 404 | Ingress routes by hostname | Use `store.localtest.me` or `localhost` |
-| Login says `Invalid email or password` | Typed password differs from the Secret | Copy it from step 7 |
-| Google sign-in shows `origin_mismatch` | Origin not allowed in Cloud Console | Add `http://localhost` (step 5) |
-| A release reports `exists and cannot be imported` | A resource from an earlier separate install still exists | Uninstall the old release, or recreate the cluster |
-
-## Security notes
-
-- The WooCommerce key is in the `woo-mcp-credentials` Secret, and the Google client ID is in `charts/stack/values-secrets.yaml`. Both also appear in Helm's release history. That's fine for a local cluster. For a shared cluster, create the Secrets yourself and reference them from the charts.
-- `GOOGLE_ALLOWED_DOMAINS` is empty, so any Google account can sign in. Set it to your company domain before sharing the dashboard with others: `--set-string gateway.auth.googleAllowedDomains=example.com`.
-- The gateway's admin password is generated and kept in `gateway-secrets`. Change it after the first sign-in.
-- `values-secrets.yaml` is git-ignored. Keep it out of commits.
+| Pods stay `Pending` after the cluster starts | Calico isn't ready yet | Wait for `calico-node` (step 2) |
+| `ImagePullBackOff` on `gateway`, `dashboard` or `mcp` | The image isn't on the node, or the tag doesn't match | Load it (step 3) and check the `image:` line |
+| `ctr: unrecognized image format` on load | The image was saved in a format kind can't read | Use the `docker save --platform linux/amd64 \| cat` form |
+| `CreateContainerConfigError` | A Secret or key is missing | Re-create it (step 4) and check the key names |
+| `CreateContainerConfigError` on the store | `store-secrets` or `woo-mcp-credentials` not created | Create them first |
+| Gateway restarts with `column ... does not exist` | An old database is being migrated | Read the gateway log; the migration adds the missing column at startup |
+| Store returns 404 on `/shop/` | Permalinks not written | Check the setup Job's log |
+| `origin_mismatch` on Google sign-in | The origin isn't allowed in Google Cloud | Add `http://localhost` under *Authorized JavaScript origins* |

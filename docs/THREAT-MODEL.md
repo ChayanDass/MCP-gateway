@@ -120,6 +120,7 @@ Next steps: show each description to the admin when the server is added, and fla
 - The ingress routes only the gateway and dashboard paths. Admin APIs require a session with the right permission.
 - The gateway sends a Content-Security-Policy header. The dashboard's nginx does not set one.
 - Network policies stop pods from reaching anything they don't need (tested locally).
+- The gateway, woo-mcp and the dashboard run as non-root with privilege escalation off and all capabilities dropped (`yamls/` and the charts).
 
 **Gap:** on the VPS the bare IP serves a self-signed certificate, which browsers warn about.
 

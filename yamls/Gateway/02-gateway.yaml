@@ -18,8 +18,16 @@ spec:
         app.kubernetes.io/name: gateway
         app.kubernetes.io/part-of: mcp-gateway
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: gateway
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           image: gateway:0.2.4
           imagePullPolicy: IfNotPresent
           ports:

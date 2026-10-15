@@ -120,7 +120,8 @@ By default Kubernetes lets any pod talk to any other pod. We restrict it with Ne
 
 | Target | Allowed from |
 |---|---|
-| gateway, dashboard | The ingress controller (matched by its pod label) |
+| gateway | The ingress controller and the dashboard |
+| dashboard | The ingress controller only; it makes no outbound calls |
 | woo-mcp | The gateway only |
 | gateway Postgres | The gateway only |
 | WordPress | The ingress controller and woo-mcp |

@@ -64,6 +64,29 @@ The same decision function serves the tool-permissions page, so the page shows w
 - **Chat** stops after 8 tool steps, and each tool result is cut to 3,000 characters, so a loop or a large result can't exhaust it.
 - **Login** is throttled: 10 failed attempts per client address in 15 minutes.
 
+## Kubernetes layout
+
+The local cluster (`yamls/`) uses three namespaces. The AWS cluster (`charts/stack`) puts everything in one, `kube-mcp`.
+
+| Workload | Namespace | Image | Port | Probes | Requests | Limits | Storage | Reached from |
+|---|---|---|---|---|---|---|---|---|
+| WordPress | store | `wordpress:7.0.4-php8.3-apache` | 80 | `/wp-login.php` (readiness and liveness) | 250m, 384Mi | 1 CPU, 768Mi | 5Gi PVC | Ingress, `store.localtest.me` |
+| MariaDB | store | `mariadb:11.4` | 3306 | `mariadb-admin ping` | 100m, 256Mi | 500m, 768Mi | 5Gi PVC | WordPress and the setup Job only |
+| Setup Job | store | `wordpress:cli-php8.3` | — | none (runs once) | 100m, 256Mi | 500m, 512Mi | shares the WordPress PVC | Nothing; it runs and exits |
+| woo-mcp | store | `woo-mcp` | 8080 | `/healthz` | 50m, 64Mi | 300m, 192Mi | none | The gateway only |
+| Postgres | gateway | `postgres:16-alpine` | 5432 | `pg_isready` | 250m, 256Mi | 500m, 512Mi | 2Gi PVC | The gateway only |
+| Gateway | gateway | `gateway` | 8080 | `/healthz`, `/readyz` (readiness checks the database) | 100m, 128Mi | 200m, 256Mi | none | Ingress (`/api`, `/mcp`, `/oauth`, `/.well-known`) and the dashboard |
+| Dashboard | gateway | `dashboard` (nginx, unprivileged) | 8080 | `/healthz` | 10m, 16Mi | 100m, 64Mi | none | Ingress (`/`) |
+| Ingress controller | ingress-nginx | `ingress-nginx/controller` | 80, 443 | the controller's own | — | — | — | The internet, on the host ports |
+
+**Secrets:** `store-secrets` (database and WordPress passwords) and `woo-mcp-credentials` (the WooCommerce key) in `store`; `gateway-secrets` (Postgres password, encryption key, bootstrap admin password) in `gateway`. Secrets are read as environment variables, and nothing secret is in a manifest.
+
+**Security context:** the gateway, woo-mcp and the dashboard run as a non-root user, with privilege escalation off and all capabilities dropped. The gateway and woo-mcp images run as uid 1000; the dashboard image runs unprivileged. The store and database images keep their own users.
+
+**Public and internal:** only the ingress controller is reachable from outside. Everything else is a `ClusterIP` service, and each one is limited by a NetworkPolicy (see [NETWORKING.md](NETWORKING.md), section 9).
+
+**Migrations:** the gateway creates or changes its schema at startup, under a Postgres advisory lock, so two replicas can't migrate at once.
+
 ## Key decisions
 
 **Dashboard on sessions, MCP on keys.** A browser can hold a cookie safely; a client config file cannot. Keeping them apart means a leaked key can't be used to reach the dashboard, and a session can't be copied into a client.
