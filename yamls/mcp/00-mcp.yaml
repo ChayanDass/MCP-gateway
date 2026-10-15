@@ -23,7 +23,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: mcp
+        app.kubernetes.io/name: woo-mcp
         app.kubernetes.io/part-of: mcp-gateway
     spec:
       containers:
@@ -31,7 +31,7 @@ spec:
           image: woo-mcp:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - name: mcp
+            - name: http
               containerPort: 8080
           env:
             - name: PORT
@@ -81,7 +81,7 @@ metadata:
   name: mcp
   namespace: store
   labels:
-    app.kubernetes.io/name: mcp
+    app.kubernetes.io/name: woo-mcp
     app.kubernetes.io/component: mcp
     app.kubernetes.io/part-of: mcp-gateway
 spec:
@@ -89,8 +89,8 @@ spec:
   selector:
     app.kubernetes.io/part-of: mcp-gateway
   ports:
-    - name: mcp
+    - name: http
       port: 8080
-      targetPort: mcp
+      targetPort: http
     
 

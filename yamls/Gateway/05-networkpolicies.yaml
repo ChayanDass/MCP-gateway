@@ -1,0 +1,137 @@
+# Network policies for the gateway namespace. Ingress is denied by default; the
+# rules below open only the paths the gateway needs. Enforced by Calico.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# DNS for the gateway, so it can resolve postgres, the MCP server and upstream hosts.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-egress
+  namespace: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Postgres, in this namespace.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - port: 5432
+    # The WooCommerce MCP server, in the store namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: store
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woo-mcp
+      ports:
+        - port: 8080
+    # Upstream MCP servers and the LLM provider, over HTTPS. Private cluster ranges are excluded,
+    # so this rule cannot reach other pods by IP.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP
+    # Ollama running on the host machine, for a local model.
+    - to:
+        - ipBlock:
+            cidr: 172.19.0.1/32
+      ports:
+        - port: 11434
+          protocol: TCP
+---
+# Postgres accepts connections from the gateway only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-gateway
+  namespace: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - port: 5432
+---
+# The gateway accepts requests from the dashboard and from the ingress controller only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-from-dashboard-and-ingress
+  namespace: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dashboard
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8080
+---
+# The dashboard is static files. It accepts requests from the ingress controller and makes none.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard-from-ingress
+  namespace: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8080
+  egress: []
