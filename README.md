@@ -311,6 +311,5 @@ Helm keeps the generated passwords, so an upgrade or rollback doesn't break the 
 - [docs/SETUP.md](docs/SETUP.md): the detailed local setup, with the manual steps.
 - [docs/STORE-SETUP.md](docs/STORE-SETUP.md): the WP-CLI steps that configure the store.
 - [docs/NETWORKING.md](docs/NETWORKING.md): addresses, the ingress, certificates, `nip.io`, the firewall, and local versus AWS.
-- [docs/ROADMAP.md](docs/ROADMAP.md): what is done and what is planned.
 - [docs/SYSTEM-DESIGN-AND-TRADEOFFS.md](docs/SYSTEM-DESIGN-AND-TRADEOFFS.md): how the system is built, how a tool call travels, and why the main choices were made.
 - [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md): assets, actors, controls, and the open gaps.

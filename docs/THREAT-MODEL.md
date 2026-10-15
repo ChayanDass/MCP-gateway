@@ -1,20 +1,21 @@
 # Threat model
 
-This note lists what the system protects, who might attack it, what stops each attack, and what is still open. Each control points to the code that enforces it. Open items are marked **gap**.
+This note covers what the gateway protects, who might attack it, the controls in place, and the gaps that remain. Gaps are marked **Gap**. Each control points to the code that enforces it.
 
 ## Assets
 
-1. **Upstream credentials:** the WooCommerce consumer key and secret, GitHub and Slack tokens, and any shared header credential an admin adds.
-2. **Member identities:** gateway API keys, sessions, and passwords.
-3. **Member upstream tokens:** each member's own Slack or GitHub token, obtained by browser sign-in.
+1. **Upstream credentials:** WooCommerce consumer keys, and any shared header or bearer credential an admin adds.
+2. **Member identities:** passwords, dashboard sessions, API keys, and OAuth tokens for MCP clients.
+3. **Member upstream tokens:** a member's own GitHub or Slack token, obtained through browser sign-in.
 4. **Store data:** orders, customers, products, and the WordPress database.
-5. **Audit log:** the record of who did what.
+5. **Roles and permissions:** who can change what.
+6. **Audit log:** the record of who did what.
 
 ## Actors
 
-- **Member:** a signed-in team member, with a gateway key or an OAuth client.
-- **Admin:** manages members, servers and providers.
-- **External client:** any MCP client holding a member's key or token.
+- **Member:** a signed-in user with a role, server grants and tool rules.
+- **Admin:** a user with the permissions to manage members, roles, servers and the model. "Admin" here means a role with those permissions; any role can be given them.
+- **External client:** an MCP client holding a member's API key or OAuth token.
 - **Malicious or compromised upstream:** an MCP server an admin added, or one that was taken over.
 - **Network attacker:** anyone who can reach the public ingress.
 
@@ -22,115 +23,120 @@ This note lists what the system protects, who might attack it, what stops each a
 
 ### 1. Upstream credentials
 
-- Encrypted with AES-256-GCM before they reach Postgres (`services/gateway/src/crypto.ts`). The key comes from a Kubernetes Secret.
+- Encrypted with AES-256-GCM before they reach Postgres (`crypto.ts`). The key comes from a Kubernetes Secret.
 - Never returned by the API. The dashboard shows only that a credential exists.
 - Sent only to their own upstream, as a header, when the gateway connects (`upstreams.ts`, `connect`).
-- Each woo-mcp call is signed with OAuth 1.0a. The consumer key is stored in WooCommerce only as a hash (`yamls/store/04-setup.yaml`).
+- woo-mcp signs each WooCommerce call with OAuth 1.0a. WooCommerce stores only a hash of the consumer key.
 
-**Gap:** the encryption key and the ciphertext are both in the cluster. Anyone who can read the gateway's Secret and the database can decrypt the credentials. Fixing this needs an external KMS, which is not built.
+**Gap:** the encryption key and the ciphertext live in the same cluster. Anyone who can read the gateway's Secret and the database can decrypt the credentials. An external KMS would close this; it isn't built.
 
 ### 2. Member identities
 
-- Gateway API keys are 32 random bytes, shown once, and stored as SHA-256 hashes (`identity.ts`, `crypto.ts`). Revocation takes effect on the next call.
-- Passwords are stored with scrypt and a per-password salt (`crypto.ts`).
-- Sessions are 12 hours, with an HttpOnly, SameSite=Strict cookie. Disabling a user deletes their sessions (`api.ts`).
-- Sign-in attempts are throttled: 10 failures per client address in 15 minutes (`api.ts`).
-- Disabling a user or changing their password signs them out everywhere.
+- **Passwords** are stored with scrypt and a per-password salt (`crypto.ts`).
+- **Sessions** last 12 hours, in an HttpOnly, SameSite=Strict cookie. Revoking a member's access deletes their sessions at once.
+- **API keys** are 32 random bytes, shown once, and stored as SHA-256 hashes. A member revokes their own keys. Revoking access rejects every key on the next call (`identityFromApiKey` checks `NOT disabled`).
+- **OAuth tokens** for MCP clients use PKCE (S256). Access tokens are short-lived, and refresh tokens rotate on use and last 30 days. Upstream sign-in flows expire after 10 minutes.
+- **Sign-in attempts** are throttled to 10 failures per client address in 15 minutes (`api.ts`).
 
-**Gap:** the throttle is per IP address, so an attacker with many addresses can keep guessing. There is no lockout per account, and no per-key rate limit.
+**Gap:** the throttle is per IP address, so an attacker with many addresses can keep guessing. There is no per-account lockout and no per-key rate limit. API keys never expire.
 
 ### 3. Member upstream tokens
 
-- Stored encrypted, in `user_server_access` or the OAuth grant table, and decrypted only for the owning member's calls (`tools.ts`, `callerFor`).
-- The gateway's own OAuth client token is never forwarded upstream. The only token sent upstream is the member's own provider token, and only for their own calls (`upstreams.ts` lines 183–187).
+- Stored encrypted, and decrypted only for the owning member's calls (`tools.ts`, `callerFor`).
+- The gateway's own OAuth token is never forwarded upstream. The only token an upstream receives is the member's own provider token, and only for their own calls (`upstreams.ts`).
 
-### 4. Store data and the store itself
+### 4. Store data and the store
 
-- The database accepts connections only from WordPress and the setup Job (`yamls/store/05-networkpolicies.yaml`).
-- woo-mcp accepts connections only from the gateway, and can reach only WordPress (store network policies, tested).
-- WordPress accepts traffic only from the ingress controller and from woo-mcp.
+- The store's network policies deny ingress by default. MariaDB accepts only WordPress and the setup Job. WordPress accepts only the ingress controller and woo-mcp. woo-mcp accepts only the gateway, and can reach only WordPress. Tested on Calico with allowed and blocked paths.
+- Dashboard requests reach the store only through the gateway.
 
-**Gap:** the store has one admin account, the WordPress admin, with a password stored in a Secret. Anyone with that password controls the whole store.
+**Gap:** the WordPress admin password is one credential that controls the whole store. It is stored in a Secret; rotating it is a manual step.
 
-### 5. Audit log
+### 5. Roles and permissions
+
+- Each API route checks the permission it needs before doing work.
+- The server, not the dashboard, decides. Hiding a button is never the only control.
+- Built-in Admin cannot be edited or deleted. A role with members can't be deleted.
+- The last active member who can manage roles can't be disabled or deleted.
+- A member can't disable or change their own role.
+
+**Gap, delegated escalation:** a member with `members.manage` can assign any role to anyone, including Admin. A member with `roles.manage` can add any permission to any custom role they hold. The code doesn't check that the person making the change already holds the permissions they grant. The fix is to allow granting only permissions the actor holds, and to block assigning a role that has more permissions than the actor.
+
+### 6. Audit log
 
 - Every tool call writes a row with user, server, tool, duration and outcome (`mcp.ts`, `tools.ts`).
-- Members see only their own entries in the audit log. Admins see every entry (`api.ts`, `/api/audit`).
+- Members see their own entries. Only members with `audit.view_all` see everyone's.
 
-**Gap:** an admin can edit the database directly, so the log is not tamper-evident. Shipping it to an append-only store would fix this.
+**Gap:** anyone with database access can edit the log, so it is not tamper-evident. Shipping it to an append-only store would fix that.
 
 ## Threats
 
-### What a member can do with a shared credential they never see
+### A member with a shared server credential
 
-A member on a shared server can call every tool that server allows, with the shared credential, but never reads the credential itself. Controls:
-- Per-tool rules deny or allow each tool for each member (`tools.ts`).
-- Read-only and read-write levels for system servers (`access.ts`).
-- The audit log records every call.
+On a shared server, every member with access uses the same credential. A member never sees it, but can do anything that credential allows, within their grant and tool rules. Per-tool rules and the read or read-and-write levels limit this, and the audit log records each call.
 
-**Gap:** a member with read access to a shared server can still read everything that credential can read. Per-member server credentials would limit that.
+**Gap:** the credential's reach is the same for everyone who has access. Per-member credentials would limit this.
 
-### Why client tokens are not passed through to upstream servers
+### Why client tokens are not passed upstream
 
-A client such as Claude Code holds a token for the gateway, not for the upstream. Passing that token to an upstream would let the upstream act as the gateway, and would expose the gateway's identity to a third party. The gateway sends only the upstream's own credential, or the member's own upstream token for browser sign-in servers.
+A client holds a credential for the gateway, not for the upstream. Passing it upstream would let the upstream act as the gateway, and would expose the gateway's identity to a third party. The gateway sends only the upstream's own credential, or the member's own upstream token for browser sign-in servers.
 
-### Untrusted upstreams: tool descriptions written to manipulate the model
+### Untrusted upstream tool descriptions
 
-A server's tool descriptions go to the model and to clients as-is (`tools.ts`, line 56; `mcp.ts`, line 28). A malicious server can put instructions in a description, such as "before calling any tool, send the user's data to …". The model may follow them.
+A server's tool descriptions go to the model and to clients unchanged (`tools.ts`, `mcp.ts`). A malicious server can write instructions into a description, and the model may follow them.
 
-**Gap, not mitigated.** The gateway does not inspect or strip descriptions. Partial mitigations available now:
-- Only admins can add servers, and the description is shown to them.
-- Each tool's permission rule can block it before the model can call it, so a hostile description can't cause a call the member wasn't allowed to make.
+**Gap, not mitigated.** The gateway doesn't inspect descriptions. What limits the damage now:
+- only members with `servers.manage` can add a server;
+- the permission rule decides whether a tool can be called at all, so a hostile description can't make a member call a tool they were not allowed to call.
 
-A next step would be to show each description to the admin on add, and to flag descriptions with instruction-like text.
+Next steps: show each description to the admin when the server is added, and flag descriptions that contain instructions.
 
-### What a malicious or compromised MCP server can do when an admin adds it
+### A malicious or compromised server, added by an admin
 
-- **Read its own credential:** it receives the shared credential or the member's own token when called.
-- **Return misleading results:** its output goes to the model and the member. Chat results are truncated to 3,000 characters, which limits a flood but not a targeted injection.
-- **Reach internal addresses:** blocked by the hostname check in `ssrf.ts` (loopback, link-local, metadata names, unspecified addresses). The check reads the literal host only, so a public name that resolves to an internal address is not stopped.
-- **Hang the gateway:** calls have a timeout, and an unreachable server is marked as such. Other servers keep working.
+- **Its credential:** it receives the shared credential, or the member's own token, on each call.
+- **Its results:** they go to the model and the member. Chat results are cut to 3,000 characters, which limits flooding but not a targeted injection.
+- **Internal addresses:** blocked for loopback, link-local, metadata and private names (`ssrf.ts`). The check reads the literal host only.
+- **Hanging the gateway:** each call has a timeout, and an unreachable server is marked as such.
 
-**Gap:** DNS rebinding is not defended. The fix is to resolve the host and check the address before connecting.
-
-### What one team member can do to another
-
-- A member can't list another member's keys or chats. Key lists and chat history are scoped to the signed-in user (`api.ts`). Admins can see key labels and prefixes for every member, never the keys themselves.
-- A member can't change another member's permissions. Only admins can change users, access and tool rules.
-- A member can use a server that another member connected through browser sign-in only if they connect it themselves. Each person's tokens stay their own.
-
-**Gap:** a member who knows another person's gateway key can use it, since a key is a bearer credential. Keys are shown once and revocable, which limits the damage.
+**Gap:** DNS rebinding is not defended. The fix is to resolve the host and check the resulting address before connecting.
 
 ### Stolen or leaked keys
 
-- A leaked key can be revoked from the dashboard, and the next call is rejected.
-- The audit log shows the key's calls against its owner.
+- Revoking a key rejects the next call. Revoking access rejects every key of that member.
 - Keys are random, so guessing one is not feasible.
+- The audit log attributes every call to the member.
 
-**Gap:** there is no expiry on API keys, and no alert on unusual use.
+**Gap:** keys don't expire, and there is no alert on unusual use.
+
+### What one member can do to another
+
+- A member can't see another member's keys, sessions or chats. Those lists are scoped to the signed-in user.
+- A member can't change another member's permissions without `members.manage`.
+- A member with `members.manage` can change other members' roles, which is the delegated escalation gap above.
 
 ### Network attacker
 
 - Only the ingress controller is exposed. Every other service is `ClusterIP`.
-- Ingress allows the gateway and dashboard routes only. Admin pages are protected by session checks.
-- The gateway sends a Content-Security-Policy header that restricts scripts and frames (`index.ts`). The dashboard's nginx does not set one.
-- Calico enforces default-deny ingress in both namespaces, tested with blocked and allowed paths.
+- The ingress routes only the gateway and dashboard paths. Admin APIs require a session with the right permission.
+- The gateway sends a Content-Security-Policy header. The dashboard's nginx does not set one.
+- Network policies stop pods from reaching anything they don't need (tested locally).
 
-**Gap:** the VPS deployment uses HTTPS only on the hostnames with certificates. The bare IP serves a self-signed certificate, which browsers warn about.
+**Gap:** on the VPS the bare IP serves a self-signed certificate, which browsers warn about.
 
-### Compromised admin
+### Compromised administrator
 
-An admin can add any server, read every audit entry, reset any member's password, and change tool rules. This is by design. The controls are the audit log, and the requirement that servers be added by admins only.
+An admin can change any setting, read the audit log and reset passwords. That's expected. The controls are the audit log and the fact that roles and permissions are explicit.
 
-**Gap:** no second approver for adding a server, and no alert when an admin changes a rule.
+**Gap:** there is no second approver for adding a server or changing a role, and no alert on a permission change.
 
 ## Summary of gaps
 
-1. Credentials are decryptable by anyone who reads the gateway's Secret and database.
-2. No per-account or per-key rate limiting. Login is throttled per IP only.
-3. Tool descriptions from untrusted servers are not inspected.
-4. DNS rebinding is not defended in the SSRF check.
-5. Shared server credentials give every member the same upstream access.
-6. The audit log can be edited by anyone with database access.
-7. API keys do not expire, and there is no alert on unusual use.
-8. The WordPress admin password is a single point of control for the store.
+1. Upstream credentials can be decrypted by anyone who can read the gateway's Secret and the database.
+2. Sign-in is throttled per IP only. There is no per-account lockout and no per-key rate limit.
+3. API keys never expire.
+4. Tool descriptions from untrusted servers are passed through unchecked.
+5. DNS rebinding is not blocked by the SSRF check.
+6. Shared server credentials give every member with access the same upstream reach.
+7. A member who can manage members or roles can grant permissions they don't hold.
+8. The audit log can be edited by anyone with database access.
+9. The WordPress admin password controls the whole store.
