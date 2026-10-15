@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ interface ClientRow {
 // Clients for the logged-in member only. Pick a client, then a setup: a key you
 // create here, or browser sign-in, which needs no key.
 export function ClientsPage({ userId }: { userId: string }) {
-  const [method, setMethod] = useState<Method>("oauth");
+  const [method, setMethod] = useState<Method>("key");
   const [client, setClient] = useState<ClientId>("claude-code");
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [connected, setConnected] = useState<ClientRow[]>([]);
@@ -41,15 +41,15 @@ export function ClientsPage({ userId }: { userId: string }) {
   const [copied, setCopied] = useState(false);
 
   function load() {
-    api<KeyRow[]>("GET", `/api/users/${userId}/keys`).then(setKeys).catch(() => undefined);
+    api<KeyRow[]>("GET", "/api/keys").then(setKeys).catch(() => undefined);
     api<ClientRow[]>("GET", `/api/users/${userId}/clients`).then(setConnected).catch(() => undefined);
   }
   useEffect(load, [userId]);
 
-  async function generate() {
+  async function createKey() {
     setStatus(null);
     try {
-      const r = await api<{ key: string }>("POST", `/api/users/${userId}/keys`, { label: label.trim() || "api key" });
+      const r = await api<{ key: string }>("POST", "/api/keys", { label: label.trim() || "API key" });
       setNewKey(r.key);
       setLabel("");
       load();
@@ -58,7 +58,7 @@ export function ClientsPage({ userId }: { userId: string }) {
     }
   }
 
-  async function revoke(id: string) {
+  async function revokeKey(id: string) {
     try {
       await api("DELETE", `/api/keys/${id}`);
       load();
@@ -102,23 +102,23 @@ export function ClientsPage({ userId }: { userId: string }) {
       <div className="min-w-0 space-y-5">
         <Tabs value={method} onValueChange={(v) => setMethod(v as Method)}>
           <TabsList>
-            <TabsTrigger value="oauth">Browser sign-in</TabsTrigger>
             <TabsTrigger value="key">API key</TabsTrigger>
+            <TabsTrigger value="oauth">Browser sign-in</TabsTrigger>
           </TabsList>
         </Tabs>
 
         {method === "key" && (
-          <Panel title="Create a key">
+          <Panel title="Create a key for a client" description="Keys are for MCP clients only. The dashboard uses your sign-in, so it needs no key.">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-48 flex-1 space-y-2">
-                <Label htmlFor="key-label">Key label</Label>
+                <Label htmlFor="key-label">Key name</Label>
                 <Input id="key-label" placeholder="e.g. laptop" value={label} onChange={(e) => setLabel(e.target.value)} />
               </div>
-              <Button onClick={generate}>Generate key</Button>
+              <Button onClick={createKey}>Create key</Button>
             </div>
             {newKey && (
               <div className="space-y-2 rounded-md border border-warning/40 bg-warning-soft p-3">
-                <p className="text-sm">Copy it now. It is shown once.</p>
+                <p className="text-sm">Shown once. Paste it into your client now.</p>
                 <code className="block break-all rounded bg-background p-2 text-xs">{newKey}</code>
               </div>
             )}
@@ -126,7 +126,7 @@ export function ClientsPage({ userId }: { userId: string }) {
         )}
 
         <Panel
-          title={method === "key" ? "Manual setup" : "Browser sign-in"}
+          title={method === "key" ? "Setup" : "Browser sign-in"}
           description={snippet.title}
           actions={
             <Button
@@ -152,16 +152,16 @@ export function ClientsPage({ userId }: { userId: string }) {
 
         {status && <Notice tone={status.kind === "ok" ? "ok" : "err"}>{status.text}</Notice>}
 
-        <Panel title={method === "key" ? "Your keys" : "Your connected clients"}>
-          {method === "key" ? (
-            activeKeys.length === 0 ? (
-              <EmptyState title="No active keys" body="Generate a key above to use with a client that needs one." />
+        {method === "key" ? (
+          <Panel title="Your keys">
+            {activeKeys.length === 0 ? (
+              <EmptyState title="No active keys" body="Create a key above for an MCP client." />
             ) : (
               <Card className="overflow-hidden p-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Label</TableHead>
+                      <TableHead>Name</TableHead>
                       <TableHead>Key</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead />
@@ -176,7 +176,7 @@ export function ClientsPage({ userId }: { userId: string }) {
                         </TableCell>
                         <TableCell className="text-muted-foreground">{new Date(k.created_at).toLocaleDateString()}</TableCell>
                         <TableCell className="text-right">
-                          <Button variant="destructive" size="sm" onClick={() => revoke(k.id)}>
+                          <Button variant="destructive" size="sm" onClick={() => revokeKey(k.id)}>
                             Revoke
                           </Button>
                         </TableCell>
@@ -185,38 +185,42 @@ export function ClientsPage({ userId }: { userId: string }) {
                   </TableBody>
                 </Table>
               </Card>
-            )
-          ) : connected.length === 0 ? (
-            <EmptyState title="No connected clients" body="No client is signed in through browser sign-in yet." />
-          ) : (
-            <Card className="overflow-hidden p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Connected</TableHead>
-                    <TableHead>Session ends</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {connected.map((c) => (
-                    <TableRow key={c.client_id}>
-                      <TableCell className="font-medium">{c.client_name}</TableCell>
-                      <TableCell className="text-muted-foreground">{new Date(c.connected_at).toLocaleString()}</TableCell>
-                      <TableCell className="text-muted-foreground">{new Date(c.expires_at).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="destructive" size="sm" onClick={() => disconnect(c.client_id)}>
-                          Disconnect
-                        </Button>
-                      </TableCell>
+            )}
+          </Panel>
+        ) : (
+          <Panel title="Your connected clients">
+            {connected.length === 0 ? (
+              <EmptyState title="No connected clients" body="No client is signed in through browser sign-in yet." />
+            ) : (
+              <Card className="overflow-hidden p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Client</TableHead>
+                      <TableHead>Connected</TableHead>
+                      <TableHead>Session ends</TableHead>
+                      <TableHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          )}
-        </Panel>
+                  </TableHeader>
+                  <TableBody>
+                    {connected.map((c) => (
+                      <TableRow key={c.client_id}>
+                        <TableCell className="font-medium">{c.client_name}</TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(c.connected_at).toLocaleString()}</TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(c.expires_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="destructive" size="sm" onClick={() => disconnect(c.client_id)}>
+                            Disconnect
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+          </Panel>
+        )}
       </div>
     </div>
   );
@@ -232,10 +236,10 @@ const CLIENT_HINT: Record<ClientId, string> = {
 };
 
 const KEY_STEPS = [
-  "Enter a label and click Generate key. Copy the key shown.",
+  "Create a key and copy it. It is shown once.",
   "Paste the command or config below into your client, in place of <your-key>.",
   "Restart the client, or reload its MCP servers.",
-  "Keep the key private. Revoke it here if it leaks.",
+  "Revoke the key here if it leaks. Other keys keep working.",
 ];
 
 const OAUTH_STEPS = [

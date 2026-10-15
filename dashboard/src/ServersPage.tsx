@@ -7,7 +7,7 @@ import type { Provider } from "./ProvidersPanel";
 import { Loading, Notice, Pill } from "./shared";
 
 // The MCP servers list: a summary, then one tile per server. Each tile opens that server's page.
-export function ServersPage({ isAdmin }: { isAdmin: boolean }) {
+export function ServersPage({ canManage }: { canManage: boolean }) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -18,8 +18,8 @@ export function ServersPage({ isAdmin }: { isAdmin: boolean }) {
   }, []);
 
   const loadProviders = useCallback(() => {
-    if (isAdmin) api<Provider[]>("GET", "/api/oauth-providers").then(setProviders).catch(() => undefined);
-  }, [isAdmin]);
+    if (canManage) api<Provider[]>("GET", "/api/oauth-providers").then(setProviders).catch(() => undefined);
+  }, [canManage]);
 
   useEffect(() => {
     load();
@@ -40,7 +40,7 @@ export function ServersPage({ isAdmin }: { isAdmin: boolean }) {
           <Pill tone="warn">{needSignIn} need sign-in</Pill>
           <Pill tone="muted">{servers?.length ?? 0} total</Pill>
         </div>
-        {isAdmin && <Button onClick={() => setAdding(true)}>Add MCP server</Button>}
+        {canManage && <Button onClick={() => setAdding(true)}>Add MCP server</Button>}
       </div>
 
       {error && <Notice tone="err">{error}</Notice>}

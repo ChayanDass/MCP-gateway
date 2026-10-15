@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api } from "./api";
+import { api, can, type Me } from "./api";
 import { Logo } from "./Logo";
 import { navigate } from "./router";
 import { ClassBadge, EmptyState, Panel } from "./shared";
@@ -18,7 +18,9 @@ interface Overview {
   recent: { ts: string; user_email: string; server_slug: string; tool: string; source: string; outcome: string; duration_ms: number }[];
 }
 
-export function OverviewPage({ isAdmin }: { isAdmin: boolean }) {
+export function OverviewPage({ me }: { me: Me }) {
+  const canModel = can(me, "model.manage");
+  const canMembers = can(me, "members.manage");
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,9 +38,9 @@ export function OverviewPage({ isAdmin }: { isAdmin: boolean }) {
     { label: "Servers connected", value: `${data.servers.connected}/${data.servers.enabled}`, hint: `${data.servers.total} added · for you`, go: "servers" },
     { label: "Tools available to you", value: String(data.tools), hint: "after permissions", go: "servers" },
     { label: "Calls, last 24 h", value: String(data.calls24h), hint: `${data.errors24h} failed · ${data.denied24h} denied`, go: "security/audit" },
-    isAdmin && data.members
+    canMembers && data.members
       ? { label: "Active members", value: String(data.members.active), hint: `${data.members.admins} admin${data.members.admins === 1 ? "" : "s"}`, go: "security/members" }
-      : { label: "Your access", value: "Member", hint: "per-server rules apply", go: "security/members" },
+      : { label: "Your role", value: me.role, hint: "per-server rules apply", go: "overview" },
   ];
 
   return (
@@ -60,20 +62,22 @@ export function OverviewPage({ isAdmin }: { isAdmin: boolean }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel
           title="Model in use"
-          actions={isAdmin && <Button variant="outline" size="sm" onClick={() => navigate("settings/model")}>Change</Button>}
+          actions={canModel && <Button variant="outline" size="sm" onClick={() => navigate("settings/model")}>Change</Button>}
         >
-          {!isAdmin ? (
-            <p className="text-sm text-muted-foreground">The chat agent uses the team's configured model.</p>
-          ) : data.model ? (
+          {data.model ? (
             <div className="flex items-center gap-3">
               <Logo id={data.model.provider === "anthropic" ? "anthropic" : hostProvider(data.model.baseUrl)} size={40} />
               <div className="min-w-0">
                 <div className="truncate font-medium">{data.model.model}</div>
-                <div className="truncate text-xs text-muted-foreground">{data.model.baseUrl}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {data.model.provider === "anthropic" ? "Anthropic" : "OpenAI-compatible"} · {data.model.baseUrl}
+                </div>
               </div>
             </div>
-          ) : (
+          ) : canModel ? (
             <p className="text-sm text-destructive">No model configured. Chat is disabled.</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No model is set yet. Ask an admin to choose one in Settings.</p>
           )}
         </Panel>
 

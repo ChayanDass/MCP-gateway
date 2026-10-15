@@ -5,7 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, type ServerView } from "./api";
+import { api, can, type Me, type ServerView } from "./api";
 import { AddServerModal } from "./AddServerModal";
 import { Logo } from "./Logo";
 import { navigate } from "./router";
@@ -15,7 +15,9 @@ import { ClassBadge, ConfirmDialog, Field, Notice, Panel, Pill, type Tone } from
 type Tab = "overview" | "tools" | "settings";
 
 // One server's own page, with tabs. The tab is part of the address: #/servers/<id>/<tab>.
-export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; isAdmin: boolean }) {
+export function ServerDetailPage({ id, tab, me }: { id: string; tab: Tab; me: Me }) {
+  const canManage = can(me, "servers.manage");
+  const canTools = can(me, "tools.manage");
   const [server, setServer] = useState<ServerView | null | undefined>(undefined);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,8 +32,8 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
   }, [id]);
 
   const loadProviders = useCallback(() => {
-    if (isAdmin) api<Provider[]>("GET", "/api/oauth-providers").then(setProviders).catch(() => undefined);
-  }, [isAdmin]);
+    if (canManage) api<Provider[]>("GET", "/api/oauth-providers").then(setProviders).catch(() => undefined);
+  }, [canManage]);
 
   useEffect(() => {
     load();
@@ -89,7 +91,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="tools">Tools ({server.tools.length})</TabsTrigger>
-          {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
+          {canManage && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
       </Tabs>
 
@@ -117,7 +119,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
             )}
           </div>
 
-          {isAdmin && (
+          {canManage && (
             <div className="flex flex-wrap items-center gap-6 border-t pt-4">
               <label className="flex items-center gap-2 text-sm">
                 <Switch checked={server.chatEnabled} disabled={busy} onCheckedChange={() => act(() => api("PATCH", `/api/servers/${server.id}`, { chatEnabled: !server.chatEnabled }))} />
@@ -160,7 +162,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
                       <ClassBadge value={t.class} />
                     </TableCell>
                     <TableCell>
-                      {isAdmin ? (
+                      {canTools ? (
                         <Select
                           value={t.override}
                           disabled={busy}
@@ -188,7 +190,7 @@ export function ServerDetailPage({ id, tab, isAdmin }: { id: string; tab: Tab; i
         </Panel>
       )}
 
-      {tab === "settings" && isAdmin && (
+      {tab === "settings" && canManage && (
         <Panel title="Settings" description="Change the name, address or credential. The sign-in type can't change after creation.">
           <div>
             <Button onClick={() => setEditing(true)}>Edit server</Button>

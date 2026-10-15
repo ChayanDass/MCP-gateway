@@ -30,7 +30,29 @@ export interface Me {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "member";
+  role: string; // the role's name, for display
+  permissions: string[];
+}
+
+// True when the signed-in user has this permission. The server enforces it too; this only hides controls.
+export function can(me: Me, permission: string): boolean {
+  return me.permissions.includes(permission);
+}
+
+export interface PermissionDef {
+  key: string;
+  label: string;
+  group: string;
+  description: string;
+}
+
+export interface RoleView {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  builtin: boolean;
+  user_count: number;
 }
 
 export interface ServerView {
@@ -56,7 +78,8 @@ export interface UserView {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "member";
+  role: string;
+  role_id: string;
   disabled: boolean;
   active_keys: string;
 }

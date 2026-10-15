@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { api, type Me } from "./api";
+import { api, can, type Me } from "./api";
 import { getTheme, setTheme, type ThemeChoice } from "./theme";
 import { navigate, useRoute } from "./router";
 import { GatewayMark } from "./Logo";
@@ -14,6 +14,7 @@ const ServersPage = lazy(() => import("./ServersPage").then((m) => ({ default: m
 const ServerDetailPage = lazy(() => import("./ServerDetailPage").then((m) => ({ default: m.ServerDetailPage })));
 const ProvidersPage = lazy(() => import("./ProvidersPanel").then((m) => ({ default: m.ProvidersPage })));
 const MembersPage = lazy(() => import("./MembersPage").then((m) => ({ default: m.MembersPage })));
+const RolesPage = lazy(() => import("./RolesPage").then((m) => ({ default: m.RolesPage })));
 const AuditPage = lazy(() => import("./AuditPage").then((m) => ({ default: m.AuditPage })));
 const ChatPage = lazy(() => import("./ChatPage").then((m) => ({ default: m.ChatPage })));
 const ClientsPage = lazy(() => import("./ClientsPage").then((m) => ({ default: m.ClientsPage })));
@@ -21,10 +22,11 @@ const LlmPage = lazy(() => import("./LlmPage").then((m) => ({ default: m.LlmPage
 const OverviewPage = lazy(() => import("./OverviewPage").then((m) => ({ default: m.OverviewPage })));
 const ToolPermissionsPage = lazy(() => import("./ToolPermissionsPage").then((m) => ({ default: m.ToolPermissionsPage })));
 
+// Each page needs a permission. A page the user lacks is hidden from the menu and from the address bar.
 interface Item {
   key: string; // the address, e.g. "security/members"
   label: string;
-  adminOnly?: boolean;
+  perm?: string; // permission needed to see the page; none means everyone
 }
 
 interface Group {
@@ -36,19 +38,19 @@ interface Group {
 
 type Entry = (Item & { icon: LucideIcon }) | Group;
 
-// Top-level pages and expandable groups. A group opens in place, like GitHub's sidebar.
 const NAV: Entry[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "servers", label: "MCP servers", icon: Server },
-  { key: "clients", label: "Clients", icon: Plug },
-  { key: "chat", label: "Chat", icon: MessageSquare },
+  { key: "clients", label: "Clients", icon: Plug, perm: "mcp.use" },
+  { key: "chat", label: "Chat", icon: MessageSquare, perm: "chat.use" },
   {
     key: "security",
     label: "Security",
     icon: Shield,
     items: [
-      { key: "security/members", label: "Members", adminOnly: true },
-      { key: "security/tools", label: "Tool permissions", adminOnly: true },
+      { key: "security/members", label: "Members", perm: "members.manage" },
+      { key: "security/roles", label: "Roles & permissions", perm: "roles.manage" },
+      { key: "security/tools", label: "Tool permissions", perm: "tools.manage" },
       { key: "security/audit", label: "Audit log" },
     ],
   },
@@ -57,8 +59,8 @@ const NAV: Entry[] = [
     label: "Settings",
     icon: Settings,
     items: [
-      { key: "settings/providers", label: "Sign-in providers", adminOnly: true },
-      { key: "settings/model", label: "Model", adminOnly: true },
+      { key: "settings/providers", label: "Sign-in providers", perm: "providers.manage" },
+      { key: "settings/model", label: "Model", perm: "model.manage" },
     ],
   },
 ];
@@ -80,34 +82,41 @@ const TITLES: Record<string, { title: string; hint: string }> = {
   servers: { title: "MCP servers", hint: "Every server the gateway connects to, and whether you can use it." },
   clients: { title: "Clients", hint: "Connect Claude Code, Cursor, VS Code, Codex or any MCP client, with a key or browser sign-in." },
   chat: { title: "Chat", hint: "Ask in plain language. The agent uses the tools your account can use." },
-  "security/members": { title: "Members", hint: "Create members, and give or revoke their access to each server." },
+  "security/members": { title: "Members", hint: "Create members, choose their role, and give or revoke their access." },
+  "security/roles": { title: "Roles & permissions", hint: "Create roles and choose what each one can do. Members get a role." },
   "security/tools": { title: "Tool permissions", hint: "Allow or deny individual tools for each member. Deny always wins." },
-  "security/audit": { title: "Audit log", hint: "Every tool call through the gateway, with who made it and the outcome." },
+  "security/audit": { title: "Audit log", hint: "Tool calls through the gateway, with who made them and the outcome." },
   "settings/providers": { title: "Sign-in providers", hint: "The services members sign in to, with their client credentials." },
   "settings/model": { title: "Model", hint: "The model the chat agent uses. Any OpenAI-compatible or Anthropic model works." },
 };
 
 export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const route = useRoute();
-  const isAdmin = me.role === "admin";
   const requested = route.join("/");
   const current = ALIASES[requested] ?? (requested || "overview");
   // The page family: "servers" for the list and detail, "security/members" and so on.
   const active = route[0] === "servers" ? "servers" : route[0] === "security" || route[0] === "settings" ? route.slice(0, 2).join("/") : route[0] || "overview";
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const allowed = (perm?: string) => !perm || can(me, perm);
 
   async function logout() {
     await api("POST", "/api/auth/logout").catch(() => undefined);
     onLogout();
   }
 
-  const visible = NAV.map((n) => (isGroup(n) ? { ...n, items: n.items.filter((i) => !i.adminOnly || isAdmin) } : n)).filter((n) => !isGroup(n) || n.items.length > 0);
+  const visible = NAV.filter((n) => isGroup(n) || allowed(n.perm))
+    .map((n) => (isGroup(n) ? { ...n, items: n.items.filter((i) => allowed(i.perm)) } : n))
+    .filter((n) => !isGroup(n) || n.items.length > 0);
   const groupFor = (key: string) => visible.find((n): n is Group => isGroup(n) && n.items.some((i) => i.key === key));
   const activeGroup = groupFor(active);
   const isOpen = (g: Group) => open[g.key] ?? g.key === activeGroup?.key;
 
   const info = TITLES[active] ?? TITLES[current] ?? TITLES.overview;
   const onServerDetail = route[0] === "servers" && route[1];
+  const pageAllowed = (key: string) => {
+    const item = NAV.flatMap((n) => (isGroup(n) ? n.items : [n])).find((i) => i.key === key);
+    return !item || allowed(item.perm);
+  };
 
   return (
     <div className="min-h-screen bg-background md:grid md:grid-cols-[15rem_1fr]">
@@ -124,11 +133,7 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {visible.map((n) =>
             isGroup(n) ? (
               <div key={n.key} className="hidden md:block">
-                <button
-                  className={cn(NAV_BTN, activeGroup?.key === n.key && "text-foreground")}
-                  aria-expanded={isOpen(n)}
-                  onClick={() => setOpen({ ...open, [n.key]: !isOpen(n) })}
-                >
+                <button className={cn(NAV_BTN, activeGroup?.key === n.key && "text-foreground")} aria-expanded={isOpen(n)} onClick={() => setOpen({ ...open, [n.key]: !isOpen(n) })}>
                   <n.icon className="size-4" />
                   <span className="flex-1 text-left">{n.label}</span>
                   <ChevronDown className={cn("size-4 transition-transform", isOpen(n) && "rotate-180")} />
@@ -177,7 +182,7 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </Avatar>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-foreground">{me.name}</div>
-              <div className="text-xs capitalize text-muted-foreground">{me.role}</div>
+              <div className="truncate text-xs text-muted-foreground">{me.role}</div>
             </div>
             <Button variant="ghost" size="icon" onClick={logout} title="Sign out" aria-label="Sign out">
               <LogOut className="size-4" />
@@ -188,31 +193,29 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
       <main className="min-w-0">
         <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
-          <PageHeader
-            title={onServerDetail ? "MCP servers" : info.title}
-            hint={onServerDetail ? "One server, its tools and its settings." : info.hint}
-          />
+          <PageHeader title={onServerDetail ? "MCP servers" : info.title} hint={onServerDetail ? "One server, its tools and its settings." : info.hint} />
           <Suspense fallback={<Loading lines={5} />}>
             {onServerDetail ? (
-              <ServerDetailPage id={route[1]} tab={(route[2] as "overview" | "tools" | "settings") || "overview"} isAdmin={isAdmin} />
+              <ServerDetailPage id={route[1]} tab={(route[2] as "overview" | "tools" | "settings") || "overview"} me={me} />
             ) : (
               <>
-                {active === "overview" && <OverviewPage isAdmin={isAdmin} />}
-                {active === "servers" && <ServersPage isAdmin={isAdmin} />}
-                {active === "clients" && <ClientsPage userId={me.id} />}
-                {active === "chat" && <ChatPage id={route[1] ?? null} />}
-                {active === "security/members" && isAdmin && <MembersPage me={me} />}
-                {active === "security/tools" && isAdmin && <ToolPermissionsPage />}
+                {active === "overview" && <OverviewPage me={me} />}
+                {active === "servers" && <ServersPage canManage={can(me, "servers.manage")} />}
+                {active === "clients" && pageAllowed("clients") && <ClientsPage userId={me.id} />}
+                {active === "chat" && pageAllowed("chat") && <ChatPage id={route[1] ?? null} />}
+                {active === "security/members" && pageAllowed("security/members") && <MembersPage me={me} />}
+                {active === "security/roles" && pageAllowed("security/roles") && <RolesPage />}
+                {active === "security/tools" && pageAllowed("security/tools") && <ToolPermissionsPage />}
                 {active === "security/audit" && <AuditPage />}
-                {active === "settings/providers" && isAdmin && <ProvidersPage />}
-                {active === "settings/model" && isAdmin && <LlmPage />}
+                {active === "settings/providers" && pageAllowed("settings/providers") && <ProvidersPage />}
+                {active === "settings/model" && pageAllowed("settings/model") && <LlmPage />}
               </>
             )}
           </Suspense>
         </div>
       </main>
 
-      {active !== "chat" && (
+      {active !== "chat" && can(me, "chat.use") && (
         <Button className="fixed bottom-5 right-5 rounded-full shadow-lg" onClick={() => navigate("chat")} aria-label="Open the assistant">
           <Sparkles className="size-4" />
           Ask
