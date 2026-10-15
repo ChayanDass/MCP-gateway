@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "./config.js";
 import { pool } from "./db.js";
-import { createSession, identityFromSession, sessionCookie, type Identity } from "./identity.js";
+import { createSession, identityFromSession, sessionCookie, IDENTITY_COLUMNS, IDENTITY_JOIN, type Identity } from "./identity.js";
 import { sha256, verifyPassword } from "./crypto.js";
 
 // OAuth 2.1 authorization server for MCP clients (the MCP authorization spec).
@@ -271,8 +271,8 @@ async function issueTokens(clientId: string, userId: string, reply: FastifyReply
 // Resolves an OAuth access token to the member it was issued to.
 export async function identityFromOAuthAccess(token: string): Promise<Identity | null> {
   const { rows } = await pool.query<Identity>(
-    `SELECT u.id, u.email, u.name, u.role
-       FROM oauth_tokens t JOIN users u ON u.id = t.user_id
+    `SELECT ${IDENTITY_COLUMNS}
+       FROM oauth_tokens t JOIN users u ON u.id = t.user_id ${IDENTITY_JOIN}
       WHERE t.token_hash = $1 AND t.kind = 'access' AND t.revoked_at IS NULL AND t.expires_at > now() AND NOT u.disabled`,
     [sha256(token)],
   );

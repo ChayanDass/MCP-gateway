@@ -6,8 +6,13 @@ export interface Identity {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "member";
+  role: string; // the role's name, for display
+  permissions: string[];
 }
+
+// The columns every identity lookup returns. The role's permissions decide what the user can do.
+export const IDENTITY_COLUMNS = `u.id, u.email, u.name, r.name AS role, r.permissions AS permissions`;
+export const IDENTITY_JOIN = `JOIN roles r ON r.id = u.role_id`;
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 export const SESSION_COOKIE = "kmcp_session";
@@ -18,8 +23,8 @@ export async function identityFromApiKey(authHeader: string | undefined): Promis
   const match = authHeader?.match(/^Bearer\s+(kmcp_[A-Za-z0-9_-]+)$/);
   if (!match) return null;
   const { rows } = await pool.query<Identity>(
-    `SELECT u.id, u.email, u.name, u.role
-       FROM api_keys k JOIN users u ON u.id = k.user_id
+    `SELECT ${IDENTITY_COLUMNS}
+       FROM api_keys k JOIN users u ON u.id = k.user_id ${IDENTITY_JOIN}
       WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND NOT u.disabled`,
     [sha256(match[1])],
   );
@@ -43,8 +48,8 @@ export async function identityFromSession(req: IncomingMessage): Promise<Identit
   const token = readCookie(req, SESSION_COOKIE);
   if (!token) return null;
   const { rows } = await pool.query<Identity>(
-    `SELECT u.id, u.email, u.name, u.role
-       FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT ${IDENTITY_COLUMNS}
+       FROM sessions s JOIN users u ON u.id = s.user_id ${IDENTITY_JOIN}
       WHERE s.token_hash = $1 AND s.expires_at > now() AND NOT u.disabled`,
     [sha256(token)],
   );
@@ -82,4 +87,10 @@ function readCookie(req: IncomingMessage, name: string): string | undefined {
     if (k === name) return v.join("=");
   }
   return undefined;
+}
+
+// The signed-in user by id, with their role and permissions. Used after sign-in.
+export async function identityById(id: string): Promise<Identity | null> {
+  const { rows } = await pool.query<Identity>(`SELECT ${IDENTITY_COLUMNS} FROM users u ${IDENTITY_JOIN} WHERE u.id = $1`, [id]);
+  return rows[0] ?? null;
 }

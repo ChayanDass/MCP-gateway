@@ -12,10 +12,12 @@ import { upstreams } from "./upstreams.js";
 async function bootstrap(): Promise<void> {
   await migrate();
 
-  const { rows: admins } = await pool.query(`SELECT 1 FROM users WHERE role = 'admin' LIMIT 1`);
+  // The first Admin is created on an empty install, with the Admin role.
+  const { rows: admins } = await pool.query(`SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'Admin' LIMIT 1`);
   if (admins.length === 0) {
     await pool.query(
-      `INSERT INTO users (email, name, role, password_hash) VALUES ($1, 'Admin', 'admin', $2)
+      `INSERT INTO users (email, name, role_id, password_hash)
+       VALUES ($1, 'Admin', (SELECT id FROM roles WHERE name = 'Admin'), $2)
        ON CONFLICT (email) DO NOTHING`,
       [config.bootstrapAdminEmail.toLowerCase(), await hashPassword(config.bootstrapAdminPassword)],
     );

@@ -3,6 +3,7 @@ import { extname, join, normalize, resolve } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { config } from "./config.js";
 import { newToken, hashPassword, sha256, verifyPassword, encrypt } from "./crypto.js";
+import { PERMISSIONS, can, isKnownPermission } from "./permissions.js";
 import { pool } from "./db.js";
 import { handleMcpRequest } from "./mcp.js";
 import { ensureConversation, runChat } from "./chat.js";
@@ -16,6 +17,7 @@ import {
   deleteSession,
   identityFromBearer,
   identityFromApiKey,
+  identityById,
   identityFromSession,
   sessionCookie,
   type Identity,
@@ -23,7 +25,7 @@ import {
 import { upstreams, type UpstreamRow } from "./upstreams.js";
 import { validateUpstreamUrl } from "./ssrf.js";
 import { listExposedTools, oauthTokensFor } from "./tools.js";
-import { accessContext, canCall, effectiveClass, type ToolOverride } from "./access.js";
+import { accessContext, canCall, effectiveClass, explainCall, type ToolOverride } from "./access.js";
 
 const SLUG_RE = /^[a-z0-9-]{2,40}$/;
 
@@ -57,14 +59,16 @@ function isSecure(): boolean {
 }
 
 // Attach the current user, or reply 401/403. Returns null when the reply was sent.
-async function currentUser(req: FastifyRequest, reply: FastifyReply, adminOnly = false): Promise<Identity | null> {
+async function currentUser(req: FastifyRequest, reply: FastifyReply, need?: string | string[]): Promise<Identity | null> {
   const user = await identityFromSession(req.raw);
   if (!user) {
     reply.code(401).send({ error: "Not signed in" });
     return null;
   }
-  if (adminOnly && user.role !== "admin") {
-    reply.code(403).send({ error: "Admins only" });
+  // Any one of the listed permissions is enough.
+  const needed = need === undefined ? [] : Array.isArray(need) ? need : [need];
+  if (needed.length && !needed.some((p) => can(user, p))) {
+    reply.code(403).send({ error: "You don't have permission to do that." });
     return null;
   }
   return user;
@@ -74,6 +78,7 @@ export function registerApi(app: FastifyInstance): void {
   // ---- MCP endpoint: the single URL external clients use -------------------
   app.all("/mcp", async (req, reply) => {
     const user = await identityFromBearer(req.headers.authorization);
+    if (user && !can(user, "mcp.use")) return reply.code(403).send({ error: "Your role can't connect MCP clients." });
     if (!user) {
       // The MCP authorization spec: point the client at the metadata so it can log in.
       return reply
@@ -91,8 +96,8 @@ export function registerApi(app: FastifyInstance): void {
       return reply.code(429).send({ error: "Too many sign-in attempts. Try again in a few minutes." });
     }
     const { email = "", password = "" } = req.body ?? {};
-    const { rows } = await pool.query<Identity & { password_hash: string | null; disabled: boolean }>(
-      `SELECT id, email, name, role, password_hash, disabled FROM users WHERE email = $1`,
+    const { rows } = await pool.query<{ id: string; password_hash: string | null; disabled: boolean }>(
+      `SELECT id, password_hash, disabled FROM users WHERE email = $1`,
       [email.trim().toLowerCase()],
     );
     const u = rows[0];
@@ -104,7 +109,7 @@ export function registerApi(app: FastifyInstance): void {
     loginAttempts.delete(req.ip);
     const token = await createSession(u.id);
     reply.header("Set-Cookie", sessionCookie(token, isSecure()));
-    return { id: u.id, email: u.email, name: u.name, role: u.role };
+    return identityById(u.id);
   });
 
   app.post("/api/auth/logout", async (req, reply) => {
@@ -140,8 +145,8 @@ export function registerApi(app: FastifyInstance): void {
       recordFailedLogin(req.ip);
       return reply.code(401).send({ error: e instanceof Error ? e.message : "Google sign-in failed" });
     }
-    const { rows } = await pool.query<Identity & { disabled: boolean }>(
-      `SELECT id, email, name, role, disabled FROM users WHERE email = $1`,
+    const { rows } = await pool.query<{ id: string; disabled: boolean }>(
+      `SELECT id, disabled FROM users WHERE email = $1`,
       [profile.email],
     );
     const u = rows[0];
@@ -152,7 +157,7 @@ export function registerApi(app: FastifyInstance): void {
     loginAttempts.delete(req.ip);
     const token = await createSession(u.id);
     reply.header("Set-Cookie", sessionCookie(token, isSecure()));
-    return { id: u.id, email: u.email, name: u.name, role: u.role };
+    return identityById(u.id);
   });
 
   // ---- MCP servers ----------------------------------------------------------
@@ -209,7 +214,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.post<{ Body: ServerInput }>("/api/servers", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "servers.manage"))) return;
     const input = req.body ?? ({} as ServerInput);
     const problem = await validateServerInput(input, true);
     if (problem) return reply.code(400).send({ error: problem });
@@ -239,7 +244,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.patch<{ Params: { id: string }; Body: ServerInput }>("/api/servers/:id", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "servers.manage"))) return;
     const input = req.body ?? ({} as ServerInput);
     const problem = await validateServerInput(input, false);
     if (problem) return reply.code(400).send({ error: problem });
@@ -265,7 +270,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.delete<{ Params: { id: string } }>("/api/servers/:id", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "servers.manage"))) return;
     const { rowCount } = await pool.query(`DELETE FROM mcp_servers WHERE id = $1`, [req.params.id]);
     if (!rowCount) return reply.code(404).send({ error: "Server not found" });
     upstreams.invalidate(req.params.id);
@@ -274,7 +279,7 @@ export function registerApi(app: FastifyInstance): void {
 
   // Per-tool override: auto (classified by annotations or name), read, write or blocked.
   app.put<{ Params: { id: string }; Body: { tool?: string; access?: string } }>("/api/servers/:id/tools", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "tools.manage"))) return;
     const { tool = "", access = "auto" } = req.body ?? {};
     if (!tool) return reply.code(400).send({ error: "Tool name is required" });
     if (!["auto", "read", "write", "blocked"].includes(access)) return reply.code(400).send({ error: "Access must be auto, read, write or blocked" });
@@ -292,19 +297,19 @@ export function registerApi(app: FastifyInstance): void {
 
   // ---- Users and API keys ---------------------------------------------------
   app.get("/api/users", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, ["members.manage", "tools.manage"]))) return;
     const { rows } = await pool.query(
-      `SELECT u.id, u.email, u.name, u.role, u.disabled, u.created_at,
+      `SELECT u.id, u.email, u.name, r.name AS role, r.id AS role_id, u.disabled, u.created_at,
               count(k.id) FILTER (WHERE k.revoked_at IS NULL) AS active_keys
-         FROM users u LEFT JOIN api_keys k ON k.user_id = u.id
-        GROUP BY u.id ORDER BY u.created_at`,
+         FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN api_keys k ON k.user_id = u.id
+        GROUP BY u.id, r.id, r.name ORDER BY u.created_at`,
     );
     return rows;
   });
 
   // Access per server for one user: none, read or write. Admins always have full access.
   app.get<{ Params: { id: string } }>("/api/users/:id/access", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "members.manage"))) return;
     const { rows } = await pool.query(
       `SELECT s.id AS server_id, s.slug, s.name, s.is_system, COALESCE(a.access, 'none') AS access
          FROM mcp_servers s LEFT JOIN user_server_access a ON a.server_id = s.id AND a.user_id = $1
@@ -315,7 +320,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.put<{ Params: { id: string }; Body: { serverId?: string; access?: string } }>("/api/users/:id/access", async (req, reply) => {
-    const admin = await currentUser(req, reply, true);
+    const admin = await currentUser(req, reply, "members.manage");
     if (!admin) return;
     const { serverId = "", access = "none" } = req.body ?? {};
     if (!["none", "read", "write"].includes(access)) return reply.code(400).send({ error: "Access must be none, read or write" });
@@ -332,12 +337,13 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   // Create a member (or admin) with a name, role, password and per-server access.
-  app.post<{ Body: { email?: string; name?: string; role?: string; password?: string; access?: Record<string, string> } }>("/api/users", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
-    const { email = "", name = "", role = "member", password = "", access = {} } = req.body ?? {};
+  app.post<{ Body: { email?: string; name?: string; roleId?: string; password?: string; access?: Record<string, string> } }>("/api/users", async (req, reply) => {
+    if (!(await currentUser(req, reply, "members.manage"))) return;
+    const { email = "", name = "", roleId = "", password = "", access = {} } = req.body ?? {};
     if (!email.includes("@") || !name.trim()) return reply.code(400).send({ error: "Email and name are required" });
-    if (role !== "admin" && role !== "member") return reply.code(400).send({ error: "Role must be admin or member" });
     if (password.length < 8) return reply.code(400).send({ error: "Password must be at least 8 characters" });
+    const { rows: roleRows } = await pool.query(`SELECT id FROM roles WHERE id = $1`, [roleId || null]).catch(() => ({ rows: [] as { id: string }[] }));
+    if (!roleRows[0]) return reply.code(400).send({ error: "Choose a role for this member" });
     for (const level of Object.values(access)) {
       if (!["none", "read", "write"].includes(level)) return reply.code(400).send({ error: "Access must be none, read or write" });
     }
@@ -345,9 +351,9 @@ export function registerApi(app: FastifyInstance): void {
     try {
       await client.query("BEGIN");
       const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO users (email, name, role, password_hash) VALUES ($1, $2, $3, $4)
+        `INSERT INTO users (email, name, role_id, password_hash) VALUES ($1, $2, $3, $4)
          ON CONFLICT (email) DO NOTHING RETURNING id`,
-        [email.trim().toLowerCase(), name.trim(), role, await hashPassword(password)],
+        [email.trim().toLowerCase(), name.trim(), roleId, await hashPassword(password)],
       );
       if (!rows[0]) {
         await client.query("ROLLBACK");
@@ -355,10 +361,7 @@ export function registerApi(app: FastifyInstance): void {
       }
       for (const [serverId, level] of Object.entries(access)) {
         if (level === "none") continue;
-        await client.query(
-          `INSERT INTO user_server_access (user_id, server_id, access) VALUES ($1, $2, $3)`,
-          [rows[0].id, serverId, level],
-        );
+        await client.query(`INSERT INTO user_server_access (user_id, server_id, access) VALUES ($1, $2, $3)`, [rows[0].id, serverId, level]);
       }
       await client.query("COMMIT");
       return reply.code(201).send({ id: rows[0].id });
@@ -371,29 +374,40 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   // Edit a user: name, role, disabled. Keeps at least one active admin.
-  app.patch<{ Params: { id: string }; Body: { name?: string; disabled?: boolean; role?: string } }>("/api/users/:id", async (req, reply) => {
-    const admin = await currentUser(req, reply, true);
+  app.patch<{ Params: { id: string }; Body: { name?: string; disabled?: boolean; roleId?: string } }>("/api/users/:id", async (req, reply) => {
+    const admin = await currentUser(req, reply, "members.manage");
     if (!admin) return;
-    const { name, disabled, role } = req.body ?? {};
-    if (role !== undefined && role !== "admin" && role !== "member") return reply.code(400).send({ error: "Bad role" });
+    const { name, disabled, roleId } = req.body ?? {};
     if (name !== undefined && !name.trim()) return reply.code(400).send({ error: "Name cannot be empty" });
-    if (req.params.id === admin.id && (disabled || (role && role !== "admin"))) {
-      return reply.code(400).send({ error: "You cannot demote or disable yourself" });
+    const { rows: cur } = await pool.query<{ role_id: string; permissions: string[] }>(
+      `SELECT u.role_id, r.permissions FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = $1`,
+      [req.params.id],
+    );
+    if (!cur[0]) return reply.code(404).send({ error: "Member not found" });
+    if (req.params.id === admin.id && (disabled === true || (roleId !== undefined && roleId !== cur[0].role_id))) {
+      return reply.code(400).send({ error: "You cannot disable yourself or change your own role" });
     }
-    const losesAdmin = (role !== undefined && role !== "admin") || disabled === true;
-    if (losesAdmin && !(await otherActiveAdminExists(req.params.id))) {
-      return reply.code(400).send({ error: "At least one active admin must remain" });
+    let nextPerms = cur[0].permissions;
+    if (roleId !== undefined && roleId !== cur[0].role_id) {
+      const { rows: r } = await pool.query<{ permissions: string[] }>(`SELECT permissions FROM roles WHERE id = $1`, [roleId]).catch(() => ({ rows: [] as { permissions: string[] }[] }));
+      if (!r[0]) return reply.code(400).send({ error: "That role doesn't exist" });
+      nextPerms = r[0].permissions;
+    }
+    const losesRoleManager = (cur[0].permissions.includes("roles.manage") && !nextPerms.includes("roles.manage")) || disabled === true;
+    if (losesRoleManager && !(await otherActiveRoleManager(req.params.id))) {
+      return reply.code(400).send({ error: "At least one active member who can manage roles must remain" });
     }
     await pool.query(
-      `UPDATE users SET name = COALESCE($2, name), disabled = COALESCE($3, disabled), role = COALESCE($4, role) WHERE id = $1`,
-      [req.params.id, name?.trim() ?? null, disabled ?? null, role ?? null],
+      `UPDATE users SET name = COALESCE($2, name), disabled = COALESCE($3, disabled), role_id = COALESCE($4, role_id) WHERE id = $1`,
+      [req.params.id, name?.trim() ?? null, disabled ?? null, roleId ?? null],
     );
-    if (disabled) await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [req.params.id]);
+    // Revoking access ends their sessions at once. Their keys stop working on the next call.
+    if (disabled === true) await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [req.params.id]);
     return { ok: true };
   });
 
   app.post<{ Params: { id: string }; Body: { password?: string } }>("/api/users/:id/password", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "members.manage"))) return;
     const password = req.body?.password ?? "";
     if (password.length < 8) return reply.code(400).send({ error: "Password must be at least 8 characters" });
     const { rowCount } = await pool.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [req.params.id, await hashPassword(password)]);
@@ -403,13 +417,13 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.delete<{ Params: { id: string } }>("/api/users/:id", async (req, reply) => {
-    const admin = await currentUser(req, reply, true);
+    const admin = await currentUser(req, reply, "members.manage");
     if (!admin) return;
     if (req.params.id === admin.id) return reply.code(400).send({ error: "You cannot delete yourself" });
-    const { rows } = await pool.query<{ role: string; disabled: boolean }>(`SELECT role, disabled FROM users WHERE id = $1`, [req.params.id]);
-    if (!rows[0]) return reply.code(404).send({ error: "User not found" });
-    if (rows[0].role === "admin" && !(await otherActiveAdminExists(req.params.id))) {
-      return reply.code(400).send({ error: "At least one active admin must remain" });
+    const { rows } = await pool.query<{ permissions: string[] }>(`SELECT r.permissions FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = $1`, [req.params.id]);
+    if (!rows[0]) return reply.code(404).send({ error: "Member not found" });
+    if (rows[0].permissions.includes("roles.manage") && !(await otherActiveRoleManager(req.params.id))) {
+      return reply.code(400).send({ error: "At least one active member who can manage roles must remain" });
     }
     await pool.query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
     return { ok: true };
@@ -417,21 +431,11 @@ export function registerApi(app: FastifyInstance): void {
 
   // A member's keys and connected clients, for the Members page. Admins see anyone;
   // members see only themselves.
-  app.get<{ Params: { id: string } }>("/api/users/:id/keys", async (req, reply) => {
-    const user = await currentUser(req, reply);
-    if (!user) return;
-    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
-    const { rows } = await pool.query(
-      `SELECT id, label, prefix, created_at, revoked_at FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`,
-      [req.params.id],
-    );
-    return rows;
-  });
 
   app.get<{ Params: { id: string } }>("/api/users/:id/clients", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
-    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
+    if (user.id !== req.params.id && !can(user, "members.manage")) return reply.code(403).send({ error: "Not allowed" });
     // A client counts as connected while it holds an unrevoked, unexpired refresh token.
     const { rows } = await pool.query(
       `SELECT c.client_id, c.client_name, min(t.created_at) AS connected_at, max(t.expires_at) AS expires_at
@@ -448,7 +452,7 @@ export function registerApi(app: FastifyInstance): void {
   app.delete<{ Params: { id: string; clientId: string } }>("/api/users/:id/clients/:clientId", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
-    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
+    if (user.id !== req.params.id && !can(user, "members.manage")) return reply.code(403).send({ error: "Not allowed" });
     await pool.query(
       `UPDATE oauth_tokens SET revoked_at = now() WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL`,
       [req.params.id, req.params.clientId],
@@ -467,32 +471,24 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   // Admins can issue keys for anyone; members only for themselves.
-  app.post<{ Params: { id: string }; Body: { label?: string } }>("/api/users/:id/keys", async (req, reply) => {
-    const user = await currentUser(req, reply);
-    if (!user) return;
-    if (user.id !== req.params.id && user.role !== "admin") return reply.code(403).send({ error: "Not allowed" });
-    const label = (req.body?.label ?? "").trim() || "api key";
-    const token = newToken("kmcp_");
-    await pool.query(`INSERT INTO api_keys (user_id, label, prefix, key_hash) VALUES ($1, $2, $3, $4)`, [
-      req.params.id,
-      label,
-      token.slice(0, 13),
-      sha256(token),
-    ]);
-    // The plaintext key is returned exactly once. Only its hash is stored.
-    return reply.code(201).send({ key: token });
-  });
 
+  // A member revokes their own key. Admins don't revoke member keys.
   app.delete<{ Params: { id: string } }>("/api/keys/:id", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
-    const { rowCount } = await pool.query(
-      `UPDATE api_keys SET revoked_at = now()
-        WHERE id = $1 AND revoked_at IS NULL AND ($2 = 'admin' OR user_id = $3)`,
-      [req.params.id, user.role, user.id],
-    );
-    if (!rowCount) return reply.code(404).send({ error: "Key not found or not yours" });
+    const { rowCount } = await pool.query(`UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL AND user_id = $2`, [req.params.id, user.id]);
+    if (!rowCount) return reply.code(404).send({ error: "Key not found" });
     return { ok: true };
+  });
+
+  // A member creates their own key for an MCP client. Shown once; only the hash is stored.
+  app.post<{ Body: { label?: string } }>("/api/keys", async (req, reply) => {
+    const user = await currentUser(req, reply, "mcp.use");
+    if (!user) return;
+    const label = (req.body?.label ?? "").trim() || "API key";
+    const token = newToken("kmcp_");
+    await pool.query(`INSERT INTO api_keys (user_id, label, prefix, key_hash) VALUES ($1, $2, $3, $4)`, [user.id, label, token.slice(0, 13), sha256(token)]);
+    return reply.code(201).send({ key: token, label });
   });
 
   // ---- Audit ----------------------------------------------------------------
@@ -502,9 +498,9 @@ export function registerApi(app: FastifyInstance): void {
     const limit = Math.min(Number(req.query.limit ?? 100), 500);
     const { rows } = await pool.query(
       `SELECT id, ts, user_email, server_slug, tool, source, duration_ms, outcome, error
-         FROM audit_log WHERE ($1 = 'admin' OR user_id = $2)
+         FROM audit_log WHERE ($1 OR user_id = $2)
         ORDER BY ts DESC LIMIT $3`,
-      [user.role, user.id, limit],
+      [can(user, "audit.view_all"), user.id, limit],
     );
     return rows;
   });
@@ -512,7 +508,7 @@ export function registerApi(app: FastifyInstance): void {
   // ---- Model settings (admin) -----------------------------------------------
   // The API key is write-only: it is encrypted on save and never returned.
   app.get("/api/llm", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "model.manage"))) return;
     const cfg = await loadLlm();
     const { rows } = await pool.query<{ catalog: string[]; catalog_at: string | null }>(
       `SELECT catalog, catalog_at FROM llm_settings WHERE id = 1`,
@@ -525,7 +521,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.put<{ Body: { provider?: string; baseUrl?: string; model?: string; apiKey?: string } }>("/api/llm", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "model.manage"))) return;
     const { provider, baseUrl = "", model = "", apiKey } = req.body ?? {};
     if (provider !== "openai" && provider !== "anthropic") return reply.code(400).send({ error: "Provider must be openai or anthropic" });
     if (!model.trim()) return reply.code(400).send({ error: "Model name is required" });
@@ -551,7 +547,7 @@ export function registerApi(app: FastifyInstance): void {
   // Lists the models the saved provider and key can use, so the admin can pick
   // a valid name instead of guessing one.
   app.get("/api/llm/models", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "model.manage"))) return;
     const cfg = await loadLlm();
     if (!cfg) return reply.code(400).send({ error: "Save a provider first" });
     const base = cfg.baseUrl.replace(/\/$/, "");
@@ -577,7 +573,7 @@ export function registerApi(app: FastifyInstance): void {
 
   // Sends one short prompt with no tools, to confirm the provider, key and model work.
   app.post("/api/llm/test", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "model.manage"))) return;
     const cfg = await loadLlm();
     if (!cfg) return reply.code(400).send({ error: "Save a model first" });
     try {
@@ -594,7 +590,8 @@ export function registerApi(app: FastifyInstance): void {
   app.get("/api/overview", async (req, reply) => {
     const user = await currentUser(req, reply);
     if (!user) return;
-    const admin = user.role === "admin";
+    const seeAll = can(user, "audit.view_all");
+    const seeMembers = can(user, "members.manage");
     const [servers, calls, recent, members, model] = await Promise.all([
       pool.query<{ total: string; enabled: string; system: string }>(
         `SELECT count(*) AS total, count(*) FILTER (WHERE enabled) AS enabled, count(*) FILTER (WHERE is_system) AS system FROM mcp_servers`,
@@ -604,17 +601,17 @@ export function registerApi(app: FastifyInstance): void {
                 count(*) FILTER (WHERE outcome NOT IN ('ok')) AS errors,
                 count(*) FILTER (WHERE outcome = 'denied') AS denied
            FROM audit_log WHERE ts > now() - interval '24 hours' AND ($1 OR user_id = $2)`,
-        [admin, user.id],
+        [seeAll, user.id],
       ),
       pool.query(
         `SELECT ts, user_email, server_slug, tool, source, outcome, duration_ms
            FROM audit_log WHERE ($1 OR user_id = $2) ORDER BY ts DESC LIMIT 6`,
-        [admin, user.id],
+        [seeAll, user.id],
       ),
-      admin
-        ? pool.query<{ total: string; admins: string }>(`SELECT count(*) AS total, count(*) FILTER (WHERE role = 'admin') AS admins FROM users WHERE NOT disabled`)
+      seeMembers
+        ? pool.query<{ total: string; admins: string }>(`SELECT count(*) AS total, count(*) FILTER (WHERE 'roles.manage' = ANY(r.permissions)) AS admins FROM users u JOIN roles r ON r.id = u.role_id WHERE NOT u.disabled`)
         : Promise.resolve({ rows: [] as { total: string; admins: string }[] }),
-      admin ? loadLlm() : Promise.resolve(null),
+      loadLlm(),
     ]);
     const exposed = await listExposedTools(user);
     // A server counts as connected when it answers for this viewer: shared servers
@@ -647,6 +644,82 @@ export function registerApi(app: FastifyInstance): void {
     };
   });
 
+  // ---- Permissions and roles ----------------------------------------------------
+  // The list of permissions, so the dashboard can show them without a hard-coded copy.
+  app.get("/api/permissions", async (req, reply) => {
+    if (!(await currentUser(req, reply))) return;
+    return PERMISSIONS;
+  });
+
+  app.get("/api/roles", async (req, reply) => {
+    if (!(await currentUser(req, reply, ["roles.manage", "members.manage"]))) return;
+    const { rows } = await pool.query(
+      `SELECT r.id, r.name, r.description, r.permissions, r.builtin, count(u.id) AS user_count
+         FROM roles r LEFT JOIN users u ON u.role_id = r.id
+        GROUP BY r.id ORDER BY r.builtin DESC, r.name`,
+    );
+    return rows.map((r) => ({ ...r, user_count: Number(r.user_count) }));
+  });
+
+  // Checks a role's name and permissions. Returns an error message, or null if they're fine.
+  const roleProblem = (name: string, permissions: unknown): string | null => {
+    if (!name.trim() || name.trim().length > 60) return "A role needs a name of up to 60 characters";
+    if (!Array.isArray(permissions) || permissions.some((p) => typeof p !== "string" || !isKnownPermission(p))) return "Unknown permission in this role";
+    return null;
+  };
+
+  app.post<{ Body: { name?: string; description?: string; permissions?: string[] } }>("/api/roles", async (req, reply) => {
+    if (!(await currentUser(req, reply, "roles.manage"))) return;
+    const name = req.body?.name ?? "";
+    const permissions = req.body?.permissions ?? [];
+    const problem = roleProblem(name, permissions);
+    if (problem) return reply.code(400).send({ error: problem });
+    try {
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO roles (name, description, permissions) VALUES ($1, $2, $3) RETURNING id`,
+        [name.trim(), (req.body?.description ?? "").trim(), [...new Set(permissions)]],
+      );
+      return reply.code(201).send({ id: rows[0].id });
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") return reply.code(409).send({ error: "A role with that name already exists" });
+      throw e;
+    }
+  });
+
+  app.patch<{ Params: { id: string }; Body: { name?: string; description?: string; permissions?: string[] } }>("/api/roles/:id", async (req, reply) => {
+    if (!(await currentUser(req, reply, "roles.manage"))) return;
+    const { rows: cur } = await pool.query<{ name: string; builtin: boolean }>(`SELECT name, builtin FROM roles WHERE id = $1`, [req.params.id]);
+    if (!cur[0]) return reply.code(404).send({ error: "Role not found" });
+    if (cur[0].builtin && cur[0].name === "Admin") return reply.code(400).send({ error: "The Admin role always has every permission and can't be changed" });
+    const name = req.body?.name ?? cur[0].name;
+    const permissions = req.body?.permissions;
+    const problem = roleProblem(name, permissions ?? []);
+    if (problem && (req.body?.name !== undefined || permissions !== undefined)) return reply.code(400).send({ error: problem });
+    try {
+      await pool.query(
+        `UPDATE roles SET name = $2, description = COALESCE($3, description), permissions = COALESCE($4, permissions) WHERE id = $1`,
+        [req.params.id, name.trim(), req.body?.description?.trim() ?? null, permissions ? [...new Set(permissions)] : null],
+      );
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") return reply.code(409).send({ error: "A role with that name already exists" });
+      throw e;
+    }
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/roles/:id", async (req, reply) => {
+    if (!(await currentUser(req, reply, "roles.manage"))) return;
+    const { rows } = await pool.query<{ builtin: boolean; users: string }>(
+      `SELECT r.builtin, count(u.id) AS users FROM roles r LEFT JOIN users u ON u.role_id = r.id WHERE r.id = $1 GROUP BY r.id`,
+      [req.params.id],
+    );
+    if (!rows[0]) return reply.code(404).send({ error: "Role not found" });
+    if (rows[0].builtin) return reply.code(400).send({ error: "Built-in roles can't be deleted" });
+    if (Number(rows[0].users) > 0) return reply.code(400).send({ error: "Move its members to another role first" });
+    await pool.query(`DELETE FROM roles WHERE id = $1`, [req.params.id]);
+    return { ok: true };
+  });
+
   // ---- OAuth providers (admin): any sign-in service, configured in the dashboard ----
   const providerView = (p: OAuthProvider & { created_at?: string }) => ({
     id: p.id,
@@ -664,13 +737,13 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.get("/api/oauth-providers", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "providers.manage"))) return;
     const { rows } = await pool.query<OAuthProvider>(`SELECT * FROM oauth_providers ORDER BY name`);
     return rows.map(providerView);
   });
 
   app.post<{ Body: Record<string, string | boolean | undefined> }>("/api/oauth-providers", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "providers.manage"))) return;
     const v = validateProviderInput(req.body ?? {}, true);
     if (typeof v === "string") return reply.code(400).send({ error: v });
     try {
@@ -687,7 +760,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.put<{ Params: { slug: string }; Body: Record<string, string | boolean | undefined> }>("/api/oauth-providers/:slug", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "providers.manage"))) return;
     const existing = await loadProvider(req.params.slug);
     if (!existing) return reply.code(404).send({ error: "Provider not found" });
     const v = validateProviderInput({ ...req.body, slug: existing.slug }, false);
@@ -701,7 +774,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.delete<{ Params: { slug: string } }>("/api/oauth-providers/:slug", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "providers.manage"))) return;
     const { rowCount } = await pool.query(`DELETE FROM oauth_providers WHERE slug = $1`, [req.params.slug]);
     if (!rowCount) return reply.code(404).send({ error: "Provider not found" });
     return { ok: true };
@@ -764,10 +837,10 @@ export function registerApi(app: FastifyInstance): void {
   // allow or deny) with the result. Static servers list live; OAuth servers use the
   // tool names recorded the last time someone connected to them.
   app.get<{ Params: { id: string } }>("/api/users/:id/tool-access", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
-    const { rows: urows } = await pool.query<Identity>(`SELECT id, email, name, role FROM users WHERE id = $1`, [req.params.id]);
-    if (!urows[0]) return reply.code(404).send({ error: "User not found" });
-    const ctx = await accessContext(urows[0]);
+    if (!(await currentUser(req, reply, "tools.manage"))) return;
+    const target = await identityById(req.params.id);
+    if (!target) return reply.code(404).send({ error: "User not found" });
+    const ctx = await accessContext(target);
     const servers = (await upstreams.loadServers()).filter((s) => s.enabled);
     const overrides = await loadOverrides();
     const out = [];
@@ -791,13 +864,14 @@ export function registerApi(app: FastifyInstance): void {
         level: ctx.grants.get(s.id) ?? "none",
         tools: tools.map((t) => {
           const rule = ctx.userTools.get(`${s.id}|${t.name}`) ?? "inherit";
-          const allowed = canCall(ctx, s.id, t as never);
+          const decision = explainCall(ctx, s.id, t as never);
           return {
             name: t.name,
             description: (t.description as string) ?? "",
             class: effectiveClass(t as never, overrides.get(`${s.id}|${t.name}`)),
             rule,
-            allowed,
+            allowed: decision.allowed,
+            reason: decision.reason,
           };
         }),
       });
@@ -806,7 +880,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.put<{ Params: { id: string }; Body: { serverId?: string; tool?: string; access?: string } }>("/api/users/:id/tool-access", async (req, reply) => {
-    if (!(await currentUser(req, reply, true))) return;
+    if (!(await currentUser(req, reply, "tools.manage"))) return;
     const { serverId = "", tool = "", access = "inherit" } = req.body ?? {};
     if (!serverId || !tool) return reply.code(400).send({ error: "Server and tool are required" });
     if (!["inherit", "allow", "deny"].includes(access)) return reply.code(400).send({ error: "Access must be inherit, allow or deny" });
@@ -824,7 +898,7 @@ export function registerApi(app: FastifyInstance): void {
 
   // ---- Chat: saved conversations, one member's own ----------------------------------
   app.get("/api/chat/conversations", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const { rows } = await pool.query(
       `SELECT c.id, c.title, c.created_at, c.updated_at,
@@ -836,14 +910,14 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.post("/api/chat/conversations", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const id = await ensureConversation(user, null, "");
     return reply.code(201).send({ id });
   });
 
   app.get<{ Params: { id: string } }>("/api/chat/conversations/:id", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const { rows: conv } = await pool.query(`SELECT id, title, created_at FROM chat_conversations WHERE id = $1 AND user_id = $2`, [req.params.id, user.id]);
     if (!conv[0]) return reply.code(404).send({ error: "Conversation not found" });
@@ -864,7 +938,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.delete<{ Params: { id: string } }>("/api/chat/conversations/:id", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const { rowCount } = await pool.query(`DELETE FROM chat_conversations WHERE id = $1 AND user_id = $2`, [req.params.id, user.id]);
     if (!rowCount) return reply.code(404).send({ error: "Conversation not found" });
@@ -872,7 +946,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.post<{ Params: { id: string }; Body: { message?: string } }>("/api/chat/conversations/:id/messages", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const message = (req.body?.message ?? "").trim();
     if (!message) return reply.code(400).send({ error: "Message is required" });
@@ -885,7 +959,7 @@ export function registerApi(app: FastifyInstance): void {
 
   // Starts a new conversation with the first message.
   app.post<{ Body: { message?: string } }>("/api/chat", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const message = (req.body?.message ?? "").trim();
     if (!message) return reply.code(400).send({ error: "Message is required" });
@@ -897,7 +971,7 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.get("/api/tools", async (req, reply) => {
-    const user = await currentUser(req, reply);
+    const user = await currentUser(req, reply, "chat.use");
     if (!user) return;
     const tools = await listExposedTools(user);
     return tools.map((t) => ({ name: t.name, description: t.description ?? "" }));
@@ -944,8 +1018,12 @@ async function loadOverrides(): Promise<Map<string, ToolOverride>> {
   return new Map(rows.map((r) => [`${r.server_id}|${r.tool}`, r.access]));
 }
 
-async function otherActiveAdminExists(excludeId: string): Promise<boolean> {
-  const { rows } = await pool.query(`SELECT 1 FROM users WHERE role = 'admin' AND NOT disabled AND id <> $1 LIMIT 1`, [excludeId]);
+// Is there another active member who can manage roles? The last one can't be removed.
+async function otherActiveRoleManager(excludeId: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE NOT u.disabled AND u.id <> $1 AND 'roles.manage' = ANY(r.permissions) LIMIT 1`,
+    [excludeId],
+  );
   return rows.length > 0;
 }
 

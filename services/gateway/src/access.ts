@@ -1,3 +1,4 @@
+import { can } from "./permissions.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { pool } from "./db.js";
 import type { Identity } from "./identity.js";
@@ -37,7 +38,7 @@ export interface AccessContext {
 
 export async function accessContext(user: Identity): Promise<AccessContext> {
   const [grantRows, overrideRows, systemRows, userToolRows] = await Promise.all([
-    user.role === "admin"
+    can(user, "servers.full_access")
       ? Promise.resolve({ rows: [] as { server_id: string; access: ServerAccess }[] })
       : pool.query<{ server_id: string; access: ServerAccess }>(
           `SELECT server_id, access FROM user_server_access WHERE user_id = $1`,
@@ -65,18 +66,30 @@ export async function accessContext(user: Identity): Promise<AccessContext> {
 // Third-party servers are all-or-nothing: an allowed member gets every tool the
 // server's own token permits, so the server's permissions are the limit.
 // A tool an admin blocked is never allowed, for anyone.
-export function canCall(ctx: AccessContext, serverId: string, tool: Tool): boolean {
+export interface CallDecision {
+  allowed: boolean;
+  reason: string; // shown to admins and members, so the outcome is never a mystery
+}
+
+// Decides whether a member may call a tool, and says why. Every check goes through here,
+// so the Tool permissions page always shows what the gateway actually enforces.
+export function explainCall(ctx: AccessContext, serverId: string, tool: Tool): CallDecision {
   const cls = effectiveClass(tool, ctx.overrides.get(`${serverId}|${tool.name}`));
-  if (cls === "blocked") return false;
-  if (ctx.user.role === "admin") return true;
+  if (cls === "blocked") return { allowed: false, reason: "Blocked for everyone by an admin" };
+  if (can(ctx.user, "servers.full_access")) return { allowed: true, reason: "Their role can use every server" };
   const level = ctx.grants.get(serverId) ?? "none";
-  if (level === "none") return false;
+  if (level === "none") return { allowed: false, reason: "No access to this server" };
   // Per-member tool rules. Deny always wins; allow grants the tool even when the
   // server level alone would not (the member still needs access to the server).
   const rule = ctx.userTools.get(`${serverId}|${tool.name}`);
-  if (rule === "deny") return false;
-  if (rule === "allow") return true;
-  if (!ctx.systemServers.has(serverId)) return true;
-  if (cls === "read") return true;
-  return level === "write";
+  if (rule === "deny") return { allowed: false, reason: "Denied for this member" };
+  if (rule === "allow") return { allowed: true, reason: "Allowed for this member" };
+  if (!ctx.systemServers.has(serverId)) return { allowed: true, reason: "Server access granted (the server's own token limits it)" };
+  if (cls === "read") return { allowed: true, reason: "Read access to this server" };
+  if (level === "write") return { allowed: true, reason: "Read and write access to this server" };
+  return { allowed: false, reason: "Needs read and write access; this member has read only" };
+}
+
+export function canCall(ctx: AccessContext, serverId: string, tool: Tool): boolean {
+  return explainCall(ctx, serverId, tool).allowed;
 }

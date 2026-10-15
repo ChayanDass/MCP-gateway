@@ -10,11 +10,20 @@ export async function migrate(): Promise<void> {
   // the same time. It is released when this implicit transaction commits.
   await pool.query(`
     SELECT pg_advisory_xact_lock(42);
+    CREATE TABLE IF NOT EXISTS roles (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name text UNIQUE NOT NULL,
+      description text NOT NULL DEFAULT '',
+      permissions text[] NOT NULL DEFAULT '{}',
+      builtin boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS users (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       email text UNIQUE NOT NULL,
       name text NOT NULL,
-      role text NOT NULL CHECK (role IN ('admin', 'member')),
+      role text,
+      role_id uuid REFERENCES roles(id),
       password_hash text,
       disabled boolean NOT NULL DEFAULT false,
       created_at timestamptz NOT NULL DEFAULT now()
@@ -28,6 +37,7 @@ export async function migrate(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now(),
       revoked_at timestamptz
     );
+    ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_enc text;
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash text PRIMARY KEY,
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -151,5 +161,20 @@ export async function migrate(): Promise<void> {
     );
     ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog_at timestamptz;
+    ALTER TABLE api_keys DROP COLUMN IF EXISTS key_enc;
+    INSERT INTO roles (name, description, permissions, builtin) VALUES
+      ('Admin', 'Full control of the gateway. Cannot be edited or deleted.', ARRAY['members.manage','roles.manage','tools.manage','servers.manage','providers.manage','model.manage','servers.full_access','audit.view_all','chat.use','mcp.use'], true),
+      ('Member', 'Uses the servers they are granted, through chat and MCP clients.', ARRAY['chat.use','mcp.use'], true)
+    ON CONFLICT (name) DO NOTHING;
+    -- On an existing database the CREATE TABLE above does nothing, so add the column here.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id uuid REFERENCES roles(id);
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'role') THEN
+        UPDATE users SET role_id = (SELECT id FROM roles WHERE name = CASE WHEN users.role = 'admin' THEN 'Admin' ELSE 'Member' END) WHERE role_id IS NULL;
+        ALTER TABLE users DROP COLUMN role;
+      END IF;
+    END $$;
+    ALTER TABLE users ALTER COLUMN role_id SET NOT NULL;
   `);
 }
