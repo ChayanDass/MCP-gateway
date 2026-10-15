@@ -109,7 +109,7 @@ export function storeObjects(p: StoreParams): K8sObject[] {
         podSelector: { matchLabels: { "app.kubernetes.io/name": "wordpress" } },
         policyTypes: ["Ingress"],
         ingress: [
-          { from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "ingress-nginx" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "ingress-nginx" } } }], ports: [{ port: 80 }] },
+          { from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-mcp" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "ingress-nginx" } } }], ports: [{ port: 80 }] },
           { from: [{ podSelector: { matchLabels: { "app.kubernetes.io/name": "woo-mcp" } } }], ports: [{ port: 80 }] },
         ],
       },
@@ -121,7 +121,7 @@ export function storeObjects(p: StoreParams): K8sObject[] {
       spec: {
         podSelector: { matchLabels: { "app.kubernetes.io/name": "woo-mcp" } },
         policyTypes: ["Ingress", "Egress"],
-        ingress: [{ from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "gateway" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "gateway" } } }], ports: [{ port: 8080 }] }],
+        ingress: [{ from: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-mcp" } }, podSelector: { matchLabels: { "app.kubernetes.io/name": "gateway" } } }], ports: [{ port: 8080 }] }],
         egress: [
           { to: [dns], ports: [{ port: 53, protocol: "UDP" }, { port: 53, protocol: "TCP" }] },
           { to: [{ podSelector: { matchLabels: { "app.kubernetes.io/name": "wordpress" } } }], ports: [{ port: 80 }] },

@@ -36,6 +36,10 @@ bootstrapAdminEmail: admin@example.com
 # Hostnames the gateway may reach even under a denied pattern.
 upstreamHostAllowlist: []
 
+# Addresses the gateway may reach on the Kubernetes API port (443/6443): the cluster service
+# IP and the control-plane node address. Set per cluster (the local kind values use these).
+kubeApiCidrs: [10.96.0.1/32, 172.19.0.2/32]
+
 # Google sign-in for the dashboard. Pass the client ID at install time with
 # --set-string auth.googleClientId=... so it stays out of the repo.
 auth:

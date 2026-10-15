@@ -4,7 +4,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: store
-  namespace: store
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/part-of: woocommerce-store
 spec:

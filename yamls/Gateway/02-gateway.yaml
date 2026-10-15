@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
-  namespace: gateway
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/name: gateway
     app.kubernetes.io/part-of: mcp-gateway
@@ -29,7 +29,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          image: gateway:0.4.0
+          image: gateway:0.4.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: gateway
@@ -55,7 +55,7 @@ spec:
                   name: gateway-secrets
                   key: bootstrap-admin-password
             - name: WOO_MCP_URL
-              value: "http://mcp.store.svc.cluster.local:8080/mcp"
+              value: "http://woo-mcp.kube-mcp.svc.cluster.local:8080/mcp"
             - name: PUBLIC_BASE_URL
               value: "http://mcp.localtest.me"
             - name: GOOGLE_CLIENT_ID
@@ -87,7 +87,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: gateway
-  namespace: gateway
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/name: gateway
     app.kubernetes.io/part-of: mcp-gateway

@@ -9,8 +9,8 @@ The same design is packaged as Helm charts in `charts/`, which are what AWS depl
 | Namespace | Workloads | Manifests | Reached at |
 |---|---|---|---|
 | `ingress-nginx` | ingress controller | `yamls/ingress/00-ingress-nginx-kind.yaml` | ports 80 and 443 on your machine |
-| `store` | WordPress, MariaDB, store setup Job, woo-mcp | `yamls/store/`, `yamls/mcp/00-mcp.yaml` | `http://store.localtest.me` |
-| `gateway` | gateway, dashboard, Postgres | `yamls/Gateway/` | `http://localhost` and `http://kube-mcp.localtest.me` |
+| `kube-mcp` | WordPress, MariaDB, store setup Job, woo-mcp (store) | `yamls/store/`, `yamls/mcp/00-mcp.yaml` | `http://store.localtest.me` |
+| `kube-mcp` | gateway, dashboard, Postgres | `yamls/Gateway/` | `http://localhost` and `http://kube-mcp.localtest.me` |
 
 `*.localtest.me` is public DNS that resolves to `127.0.0.1`, so no `/etc/hosts` edits are needed.
 
@@ -49,26 +49,25 @@ The tags must match the `image:` lines in the manifests. If you build a new vers
 
 The ingress controller image is pulled from `registry.k8s.io` by the node itself. If the node can't reach it, pull it on the host and load it the same way.
 
-## 4. Namespaces, secrets, then workloads
+## 4. Namespace, secrets, then workloads
 
-Create the secrets first, because the workloads read them. The values are random. The store values must match what the setup Job registers with WooCommerce.
+Everything runs in one namespace, `kube-mcp`, the same as the Helm release. Create the namespace and the secrets first, because the workloads read them. The values are random. The store values must match what the setup Job registers with WooCommerce.
 
 ```sh
-kubectl apply -f yamls/store/00-namespace.yaml
 kubectl apply -f yamls/Gateway/00-namespace.yaml
 
 rnd() { openssl rand -hex "$1"; }
 
-kubectl -n store create secret generic store-secrets \
+kubectl -n kube-mcp create secret generic store-secrets \
   --from-literal=mariadb-root-password="$(rnd 16)" \
   --from-literal=mariadb-password="$(rnd 16)" \
   --from-literal=wp-admin-password="$(rnd 16)"
 
-kubectl -n store create secret generic woo-mcp-credentials \
+kubectl -n kube-mcp create secret generic woo-mcp-credentials \
   --from-literal=consumer-key="ck_$(rnd 20)" \
   --from-literal=consumer-secret="cs_$(rnd 20)"
 
-kubectl -n gateway create secret generic gateway-secrets \
+kubectl -n kube-mcp create secret generic gateway-secrets \
   --from-literal=postgres-password="$(rnd 24)" \
   --from-literal=gateway-encryption-key="$(openssl rand -base64 32)" \
   --from-literal=bootstrap-admin-password="$(rnd 16)"
@@ -76,39 +75,41 @@ kubectl -n gateway create secret generic gateway-secrets \
 
 Do not apply `yamls/store/01-secrets.yaml` as it is. It holds `CHANGE_ME` placeholders for reference. Keep the generated values somewhere private: the gateway encryption key is needed to read stored upstream credentials later.
 
-Apply the ingress controller and the store:
+Apply the ingress controller, then the store. The store's network policies must be in place before its pods start, which is why they come before WordPress:
 
 ```sh
 kubectl apply -f yamls/ingress/00-ingress-nginx-kind.yaml
-kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=300s
+kubectl -n kube-mcp wait --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=300s
 
 kubectl apply -f yamls/store/02-mariadb.yaml
-kubectl -n store rollout status statefulset/mariadb --timeout=300s
+kubectl -n kube-mcp rollout status statefulset/mariadb --timeout=300s
+kubectl apply -f yamls/store/05-networkpolicies.yaml
 kubectl apply -f yamls/store/03-wordpress.yaml
-kubectl -n store rollout status deploy/wordpress --timeout=600s
+kubectl -n kube-mcp rollout status deploy/wordpress --timeout=600s
 kubectl apply -f yamls/store/04-setup.yaml
-kubectl -n store wait --for=condition=complete job/store-setup --timeout=15m
-kubectl apply -f yamls/store/05-networkpolicies.yaml -f yamls/store/06-ingress.yaml
+kubectl -n kube-mcp wait --for=condition=complete job/store-setup --timeout=15m
+kubectl apply -f yamls/store/06-ingress.yaml
 ```
 
-The setup Job installs WordPress and WooCommerce, loads the sample products, and registers the WooCommerce key. It runs once. To run it again, delete it first with `kubectl -n store delete job store-setup`.
+The setup Job installs WordPress and WooCommerce, loads the sample products, and registers the WooCommerce key. It runs once. To run it again, delete it first with `kubectl -n kube-mcp delete job store-setup`.
 
-Then the MCP server, the gateway and the dashboard:
+Then the MCP server, and the gateway with its database. Apply the gateway's network policies before the gateway starts, or the default-deny ingress policy blocks Postgres:
 
 ```sh
 kubectl apply -f yamls/mcp/00-mcp.yaml
-kubectl -n store rollout status deploy/mcp --timeout=180s
+kubectl -n kube-mcp rollout status deploy/woo-mcp --timeout=240s
 
 kubectl apply -f yamls/Gateway/01-postgres.yaml
-kubectl -n gateway rollout status statefulset/postgres --timeout=300s
+kubectl -n kube-mcp rollout status statefulset/postgres --timeout=300s
+kubectl apply -f yamls/Gateway/06-provisioner-rbac.yaml
+kubectl apply -f yamls/Gateway/05-networkpolicies.yaml
 kubectl apply -f yamls/Gateway/02-gateway.yaml
-kubectl -n gateway rollout status deploy/gateway --timeout=240s
-kubectl apply -f yamls/Gateway/03-dashboard.yml
-kubectl -n gateway rollout status deploy/dashboard --timeout=240s
-kubectl apply -f yamls/Gateway/04-ingress.yaml -f yamls/Gateway/05-networkpolicies.yaml
+kubectl -n kube-mcp rollout status deploy/gateway --timeout=300s
+kubectl apply -f yamls/Gateway/03-dashboard.yml -f yamls/Gateway/04-ingress.yaml
+kubectl -n kube-mcp rollout status deploy/dashboard --timeout=240s
 ```
 
-The gateway's `DATABASE_URL` and the Postgres `POSTGRES_DB` must name the same database. The manifests use `mcp-db` for the database and `mcp` for the user.
+The gateway's `DATABASE_URL` and the Postgres `POSTGRES_DB` must name the same database. The manifests use `mcp-db` for the database and `mcp` for the user. The Helm chart (`charts/gateway`) uses `gateway` for both, so the two are not interchangeable on an existing database.
 
 ## 5. Check it
 
@@ -123,7 +124,7 @@ curl -s -o /dev/null -w "store           %{http_code}\n" http://store.localtest.
 Expected: `200` for all three. Then sign in at `http://localhost`:
 
 - **Email:** `admin@example.com`, the bootstrap admin in `yamls/Gateway/02-gateway.yaml`.
-- **Password:** `kubectl -n gateway get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo`
+- **Password:** `kubectl -n kube-mcp get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo`
 
 Check the policies with a pod that is not allowed through. From the `default` namespace it should time out, and from the gateway it should connect:
 

@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: store
-  labels:
-    app.kubernetes.io/part-of: woocommerce-store
-    kmcp.io/managed: "true"

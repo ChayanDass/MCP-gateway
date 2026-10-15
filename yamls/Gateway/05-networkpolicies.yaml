@@ -4,7 +4,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-ingress
-  namespace: gateway
+  namespace: kube-mcp
 spec:
   podSelector: {}
   policyTypes: [Ingress]
@@ -14,7 +14,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: gateway-egress
-  namespace: gateway
+  namespace: kube-mcp
 spec:
   podSelector:
     matchLabels:
@@ -54,7 +54,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: store
+              kubernetes.io/metadata.name: kube-mcp
           podSelector:
             matchLabels:
               app.kubernetes.io/name: woo-mcp
@@ -95,8 +95,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: postgres-from-gateway
-  namespace: gateway
+  name: postgres-from-gateway-only
+  namespace: kube-mcp
 spec:
   podSelector:
     matchLabels:
@@ -114,8 +114,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: gateway-from-dashboard-and-ingress
-  namespace: gateway
+  name: gateway-allow-ingress-controller
+  namespace: kube-mcp
 spec:
   podSelector:
     matchLabels:
@@ -128,7 +128,7 @@ spec:
               app.kubernetes.io/name: dashboard
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: kube-mcp
           podSelector:
             matchLabels:
               app.kubernetes.io/name: ingress-nginx
@@ -140,7 +140,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: dashboard-from-ingress
-  namespace: gateway
+  namespace: kube-mcp
 spec:
   podSelector:
     matchLabels:
@@ -150,7 +150,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: kube-mcp
           podSelector:
             matchLabels:
               app.kubernetes.io/name: ingress-nginx

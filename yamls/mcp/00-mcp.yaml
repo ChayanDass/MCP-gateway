@@ -11,8 +11,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mcp
-  namespace: store
+  name: woo-mcp
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/part-of: mcp-gateway
 spec:
@@ -31,7 +31,7 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
       containers:
-        - name: mcp
+        - name: woo-mcp
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -86,8 +86,8 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mcp
-  namespace: store
+  name: woo-mcp
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/name: woo-mcp
     app.kubernetes.io/component: mcp

@@ -6,7 +6,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: gateway
-  namespace: gateway
+  namespace: kube-mcp
   labels:
     app.kubernetes.io/part-of: mcp-gateway
 ---
@@ -42,4 +42,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: gateway
-    namespace: gateway
+    namespace: kube-mcp
