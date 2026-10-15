@@ -13,6 +13,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: "roles.manage", label: "Manage roles", group: "Team", description: "Create and edit roles, and choose what each role can do." },
   { key: "tools.manage", label: "Set tool permissions", group: "Team", description: "Allow or block individual tools, for each server and for each member." },
   { key: "servers.manage", label: "Set up MCP servers", group: "Servers", description: "Add, edit, turn off and remove MCP servers." },
+  { key: "stores.manage", label: "Create and delete stores", group: "Servers", description: "Create, retry and delete WooCommerce stores that run on the cluster." },
   { key: "providers.manage", label: "Set up sign-in providers", group: "Settings", description: "Add and edit the services members sign in to for their own server accounts." },
   { key: "model.manage", label: "Set up the model", group: "Settings", description: "Choose the model and provider the chat agent uses." },
   { key: "servers.full_access", label: "Use every server", group: "Access", description: "Use every server and tool without per-server grants." },

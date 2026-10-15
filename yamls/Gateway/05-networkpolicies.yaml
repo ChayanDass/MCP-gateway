@@ -40,6 +40,16 @@ spec:
               app.kubernetes.io/name: postgres
       ports:
         - port: 5432
+    # Store MCP servers, one per store namespace (labelled kmcp.io/managed).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kmcp.io/managed: "true"
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woo-mcp
+      ports:
+        - port: 8080
     # The WooCommerce MCP server, in the store namespace.
     - to:
         - namespaceSelector:
@@ -60,6 +70,18 @@ spec:
         - port: 443
           protocol: TCP
         - port: 80
+          protocol: TCP
+    # The Kubernetes API, used by the store provisioner: the service address, and the
+    # control plane's address that the service resolves to.
+    - to:
+        - ipBlock:
+            cidr: 10.96.0.1/32
+        - ipBlock:
+            cidr: 172.19.0.2/32
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
           protocol: TCP
     # Ollama running on the host machine, for a local model.
     - to:

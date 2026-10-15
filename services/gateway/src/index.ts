@@ -1,3 +1,5 @@
+import { registerStoreRoutes } from "./stores/routes.js";
+import { startProvisioner } from "./stores/provisioner.js";
 import { renderMetrics } from "./metrics.js";
 import Fastify from "fastify";
 import { config } from "./config.js";
@@ -36,6 +38,7 @@ async function bootstrap(): Promise<void> {
 
 async function main(): Promise<void> {
   await bootstrap();
+  startProvisioner();
 
   const app = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024, trustProxy: true });
   app.get("/healthz", async () => "ok");
@@ -64,6 +67,7 @@ async function main(): Promise<void> {
   await app.register(formbody);
   registerOAuthRoutes(app);
   registerApi(app);
+  registerStoreRoutes(app);
   app.setNotFoundHandler(async (req, reply) => {
     if (req.url.startsWith("/api/")) return reply.code(404).send({ error: "Not found" });
     return serveDashboard(req, reply);

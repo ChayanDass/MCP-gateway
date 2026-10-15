@@ -162,6 +162,21 @@ export async function migrate(): Promise<void> {
     ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS catalog_at timestamptz;
     ALTER TABLE api_keys DROP COLUMN IF EXISTS key_enc;
+    CREATE TABLE IF NOT EXISTS stores (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      owner_id uuid NOT NULL REFERENCES users(id),
+      name text NOT NULL,
+      slug text UNIQUE NOT NULL,
+      namespace text NOT NULL,
+      status text NOT NULL CHECK (status IN ('provisioning', 'ready', 'failed', 'deleting')),
+      url text NOT NULL,
+      error text,
+      secrets_enc text,
+      started_at timestamptz NOT NULL DEFAULT now(),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    UPDATE roles SET permissions = array_append(permissions, 'stores.manage') WHERE name = 'Admin' AND NOT ('stores.manage' = ANY(permissions));
     INSERT INTO roles (name, description, permissions, builtin) VALUES
       ('Admin', 'Full control of the gateway. Cannot be edited or deleted.', ARRAY['members.manage','roles.manage','tools.manage','servers.manage','providers.manage','model.manage','servers.full_access','audit.view_all','chat.use','mcp.use'], true),
       ('Member', 'Uses the servers they are granted, through chat and MCP clients.', ARRAY['chat.use','mcp.use'], true)

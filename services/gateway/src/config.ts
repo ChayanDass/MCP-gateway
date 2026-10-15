@@ -29,6 +29,19 @@ export const config = {
   upstreamListTimeoutMs: Number(process.env.UPSTREAM_LIST_TIMEOUT_MS ?? 15000),
   // How often the background health loop re-lists each enabled upstream.
   healthIntervalMs: Number(process.env.HEALTH_INTERVAL_MS ?? 15000),
+  // Stores (WooCommerce on the cluster, one namespace each).
+  storeBaseDomain: process.env.STORE_BASE_DOMAIN ?? "localtest.me",
+  storeScheme: process.env.STORE_URL_SCHEME ?? "http",
+  storeStorageClass: process.env.STORE_STORAGE_CLASS ?? "standard",
+  storeTlsIssuer: process.env.STORE_TLS_ISSUER ?? "",
+  maxStoresPerUser: Number(process.env.MAX_STORES_PER_USER ?? 3),
+  storeProvisionTimeoutMs: Number(process.env.STORE_PROVISION_TIMEOUT_MS ?? 1200000),
+  storeImages: {
+    wordpress: process.env.STORE_IMAGE_WORDPRESS ?? "wordpress:7.0.4-php8.3-apache",
+    mariadb: process.env.STORE_IMAGE_MARIADB ?? "mariadb:11.4",
+    wpCli: process.env.STORE_IMAGE_WPCLI ?? "wordpress:cli-php8.3",
+    wooMcp: process.env.STORE_IMAGE_WOO_MCP ?? "woo-mcp:0.1.0",
+  },
   // Calls per key (or per member, for session users) per minute on /mcp.
   rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE ?? 120),
   // When one member can see more tools than this, /mcp offers two meta tools
