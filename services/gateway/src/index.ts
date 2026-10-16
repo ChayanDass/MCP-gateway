@@ -46,9 +46,14 @@ async function main(): Promise<void> {
   app.get("/healthz", async () => "ok");
   // Metrics for in-cluster scraping. The ingress doesn't route this path.
   app.get("/metrics", async (_req, reply) => {
-    const servers = await upstreams.loadServers();
-    const status = servers.map((sv) => ({ slug: sv.slug, status: upstreams.status(sv.id).status }));
-    return reply.type("text/plain; version=0.0.4").send(renderMetrics(status));
+    try {
+      const servers = await upstreams.loadServers();
+      const status = servers.map((sv) => ({ slug: sv.slug, status: upstreams.status(sv.id).status }));
+      return reply.type("text/plain; version=0.0.4").send(renderMetrics(status));
+    } catch (error) {
+      app.log.error({ err: error }, "could not collect upstream status for metrics");
+      return reply.type("text/plain; version=0.0.4").send(renderMetrics([], true));
+    }
   });
   app.get("/readyz", async () => {
     await pool.query("SELECT 1");

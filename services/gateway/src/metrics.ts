@@ -30,8 +30,10 @@ export function recordRateLimited(scope: string): void {
   limited.set(scope, (limited.get(scope) ?? 0) + 1);
 }
 
-export function renderMetrics(upstreamStatus: { slug: string; status: string }[]): string {
+export function renderMetrics(upstreamStatus: { slug: string; status: string }[], upstreamStatusCollectionError = false): string {
   const out: string[] = [];
+  out.push("# HELP kmcp_metrics_upstream_status_collection_error 1 when upstream status could not be collected.", "# TYPE kmcp_metrics_upstream_status_collection_error gauge");
+  out.push(`kmcp_metrics_upstream_status_collection_error ${upstreamStatusCollectionError ? 1 : 0}`);
   out.push("# HELP kmcp_http_requests_total Completed HTTP requests by method, route template, and status class.", "# TYPE kmcp_http_requests_total counter");
   for (const [key, metric] of httpRequests) {
     const [method, route, status] = key.split("|");

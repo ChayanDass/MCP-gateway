@@ -63,6 +63,14 @@ spec:
           annotations:
             summary: Gateway HTTP error rate is elevated
             description: More than five percent of gateway HTTP responses are 5xx for ten minutes.
+        - alert: KubeMcpGatewayMetricsCollectionFailed
+          expr: kmcp_metrics_upstream_status_collection_error{namespace={{ .Release.Namespace | quote }}} > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Gateway cannot collect upstream status metrics
+            description: Check gateway database connectivity and gateway logs.
 {{- end }}
 ---
 apiVersion: apps/v1

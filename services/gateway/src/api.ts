@@ -1,5 +1,5 @@
 import { clearRateLimit, isRateLimited, takeToken } from "./ratelimit.js";
-import { recordRateLimited } from "./metrics.js";
+import { recordHttpRequest, recordRateLimited } from "./metrics.js";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -86,6 +86,8 @@ export function registerApi(app: FastifyInstance): void {
         .header("WWW-Authenticate", `Bearer resource_metadata="${issuer()}/.well-known/oauth-protected-resource"`)
         .send({ error: "Sign in to the gateway, or send a valid API key" });
     }
+    const started = performance.now();
+    reply.raw.once("finish", () => recordHttpRequest(req.method, "/mcp", reply.raw.statusCode, performance.now() - started));
     reply.hijack();
     await handleMcpRequest(user, req.raw, reply.raw, req.body);
   });

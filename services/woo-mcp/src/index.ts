@@ -27,20 +27,20 @@ const stamp = () => new Date().toISOString();
 function buildServer(): McpServer {
   const server = new McpServer({ name: "woocommerce", version: "0.1.0" });
 
-  // Log each tool call with its arguments, outcome and duration. Wrapping
-  // registerTool covers every tool without touching the tool definitions.
+  // Log tool outcomes and durations without customer arguments or response data.
+  // Wrapping registerTool covers every tool without touching its definition.
   const register = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
   server.registerTool = ((name: string, config: unknown, handler: (args: unknown, extra: unknown) => Promise<{ isError?: boolean; content?: { text?: string }[] }>) =>
     register(name, config, async (args: unknown, extra: unknown) => {
       const started = Date.now();
-      const input = JSON.stringify(args);
       try {
         const result = await handler(args, extra);
-        const detail = result.isError ? `error="${result.content?.[0]?.text ?? ""}"` : "ok";
-        console.log(`${stamp()} tool=${name} ${detail} ${Date.now() - started}ms args=${input}`);
+        console.log(`${stamp()} tool=${name} outcome=${result.isError ? "error" : "ok"} ${Date.now() - started}ms`);
         return result;
       } catch (e) {
-        console.log(`${stamp()} tool=${name} threw ${Date.now() - started}ms args=${input} ${e instanceof Error ? e.message : String(e)}`);
+        const errorType = e instanceof Error ? e.name : "UnknownError";
+        const status = e instanceof WooError ? ` status=${e.status}` : "";
+        console.log(`${stamp()} tool=${name} outcome=threw error_type=${errorType}${status} ${Date.now() - started}ms`);
         throw e;
       }
     })) as unknown as typeof server.registerTool;
@@ -175,10 +175,12 @@ app.get(["/healthz", "/readyz"], (_req: Request, res: Response) => {
 // replica can answer and a restart loses no session.
 app.all("/mcp", async (req: Request, res: Response) => {
   const started = Date.now();
-  const rpc = Array.isArray(req.body) ? "batch" : (req.body?.method ?? "-");
-  const tool = rpc === "tools/call" ? req.body.params?.name : undefined;
-  console.log(`${stamp()} request ${req.method} rpc=${rpc}${tool ? ` tool=${tool}` : ""} from=${req.ip} agent="${req.get("user-agent") ?? "-"}"`);
-  res.on("finish", () => console.log(`${stamp()} response rpc=${rpc} status=${res.statusCode} ${Date.now() - started}ms`));
+  const rawRpc = Array.isArray(req.body) ? "batch" : req.body?.method;
+  const rpc = typeof rawRpc === "string" ? rawRpc.slice(0, 80) : "invalid";
+  const rawTool = rpc === "tools/call" ? req.body?.params?.name : undefined;
+  const tool = typeof rawTool === "string" ? rawTool.slice(0, 120) : undefined;
+  console.log(JSON.stringify({ time: stamp(), event: "request", method: req.method, rpc, ...(tool ? { tool } : {}) }));
+  res.on("finish", () => console.log(JSON.stringify({ time: stamp(), event: "response", rpc, status: res.statusCode, durationMs: Date.now() - started })));
 
   const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -192,7 +194,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 
 // Last-resort error handler, so a failed request never leaves a socket hanging.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("mcp request failed", err instanceof WooError ? err.message : err);
+  console.error("mcp request failed", err instanceof WooError ? `WooError status=${err.status}` : err instanceof Error ? err.name : "UnknownError");
   if (!res.headersSent) res.status(500).json({ error: "internal error" });
 });
 
