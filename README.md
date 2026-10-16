@@ -137,7 +137,7 @@ See [Networking](docs/NETWORKING.md) for ports, request paths, TLS, firewall rul
 
 ## Scaling and current limits
 
-The web and MCP services are containerized and some replica counts are Helm-configurable, but this repository does not define HPAs, PodDisruptionBudgets, distributed rate limiting, or a highly available database. Gateway request rate limits are held per process, so adding replicas multiplies the effective limit. PostgreSQL, MariaDB, and WordPress each run as one replica with single-node persistent storage; they are not made highly available by scaling the gateway. Read [Operations and scaling](docs/OPERATIONS-AND-SCALING.md) before increasing replicas or moving beyond the demo/small-team deployment.
+The dev and prod values now run two gateway replicas against the same PostgreSQL Service. Gateway MCP/login rate-limit windows and upstream OAuth handshakes are stored in PostgreSQL, so they are shared across replicas. The chart adds a gateway PodDisruptionBudget and best-effort node spreading when the gateway has more than one replica. There is no HPA. PostgreSQL, MariaDB, and WordPress remain single replicas with single-node persistent storage; gateway scaling does not make those components highly available. Read [Operations and scaling](docs/OPERATIONS-AND-SCALING.md) before increasing replicas or moving beyond the demo/small-team deployment.
 
 ## Repository map
 

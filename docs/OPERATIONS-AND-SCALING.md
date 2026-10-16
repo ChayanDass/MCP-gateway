@@ -1,6 +1,6 @@
 # Operations, capacity, and scaling
 
-The current deployment is a compact single-cluster stack intended for local development and small-team evaluation. Helm exposes a few application replica counts, but the project does not currently configure HPAs, PodDisruptionBudgets, multi-zone placement, shared rate limiting, database replication, or automated backups. Increasing a replica count is not the same as making the full system highly available.
+The current deployment is a compact single-cluster stack intended for local development and small-team evaluation. Dev and prod values run two gateway replicas against the same PostgreSQL Service. The chart configures a gateway PodDisruptionBudget and best-effort spreading across node hostnames when more than one replica is requested. There is no HPA, database replication, or automated backup system. Increasing gateway replicas does not make the full system highly available.
 
 ## Current capacity shape
 
@@ -9,7 +9,7 @@ The chart defaults in `charts/*/values.yaml` are starting resource requests and 
 | Workload | Default replicas | State / dependency | Scaling guidance |
 |---|---:|---|---|
 | Dashboard | 1 | Static files in the image | Can scale behind its Service; check ingress and browser/API load |
-| Gateway | 1 | PostgreSQL for durable state; per-process caches and rate counters | Can scale for request concurrency with caveats below |
+| Gateway | 2 in dev/prod values (chart default 1) | PostgreSQL for durable state and shared rate-limit/OAuth-flow state; upstream connection/health caches remain per process | Can scale for request concurrency with caveats below |
 | `woo-mcp` | 1 | WordPress REST API and WooCommerce | Can scale if WordPress, MariaDB, and WooCommerce API throughput support it |
 | PostgreSQL | 1 | `ReadWriteOnce` PVC | Do not scale the StatefulSet replicas; use a planned HA database design first |
 | WordPress | 1 | Shared files PVC and MariaDB; `Recreate` update strategy | Do not scale this deployment; current file storage and PHP configuration are single-instance |
@@ -48,12 +48,13 @@ kubectl -n kube-mcp rollout status deployment/woo-mcp
 
 For production, change the values in Git and let Argo CD apply them. Do not make long-lived production replica changes only with `kubectl scale`; Argo CD self-heal will reconcile back to Git.
 
-### Gateway replica caveats
+### Gateway replica behavior and limits
 
 - Requests are served by the Service across ready pods. Durable identity and configuration are in PostgreSQL, and schema migrations use an advisory lock.
-- MCP rate limits are per process. With N gateway replicas, the effective aggregate limit can approach N times `RATE_LIMIT_PER_MINUTE` per key, depending on load balancing. For a strict global limit, use a shared store or gateway-level rate limiter; neither is configured here.
+- MCP request counters and failed-login windows are stored in PostgreSQL, so replicas share their limits. This makes rate limiting consistent across replicas, but adds a database operation to requests that enter those limits. The MCP limit defaults to 120 requests per minute per member.
+- Upstream OAuth flow state, including the PKCE verifier in encrypted form, is stored briefly in PostgreSQL and consumed once by the callback. OAuth callbacks can therefore reach any gateway replica.
 - Upstream health checks and connection caches are per process. Each replica may establish its own upstream connections and perform its own health checks.
-- PostgreSQL remains a single point of failure and can become the throughput limit. More gateway pods do not increase database capacity.
+- PostgreSQL remains a single point of failure and can become the throughput limit. More gateway pods do not increase database capacity. The default pool allows up to 10 PostgreSQL connections per gateway pod; budget `replicas × databasePoolMax` plus other clients against PostgreSQL's connection limit.
 - Before production use, verify session behavior during rolling updates and plan graceful shutdown, disruption budgets, and DB connection limits.
 
 ### `woo-mcp` replica caveats
@@ -74,13 +75,13 @@ Before operating a non-disposable environment:
 
 ## Autoscaling and a growth path
 
-There are no HPAs in the charts. Replica counts are static Helm values; Kubernetes will keep that count but will not automatically scale based on CPU, memory, or request volume.
+There are no HPAs in the charts. Replica counts are static Helm values; Kubernetes will keep that count but will not automatically scale based on CPU, memory, or request volume. The gateway PDB is created when its configured replica count exceeds one; it protects against some voluntary disruptions, not node or database failure.
 
 For a measured small-team deployment, a practical order is:
 
 1. Collect CPU/memory usage, gateway request rate/latency, upstream error rate, and database saturation. `/metrics` exposes gateway application counters in Prometheus text format inside the cluster.
 2. Set resource requests from observed normal and peak usage; set limits with enough headroom for startup and chat/tool bursts. Watch for CPU throttling and memory restarts.
-3. Scale dashboard and gateway replicas and confirm database connections, rate-limit semantics, and rolling behavior.
+3. Scale dashboard and gateway replicas and confirm database connections, rate-limit behavior, and rolling behavior.
 4. Scale `woo-mcp` only after measuring WordPress/MariaDB and upstream limits.
 5. Address database backups, restore drills, storage availability, and database failover before treating replica counts as availability.
 6. Add HPA only with a metrics source, resource requests, and a strategy for per-replica limits and graceful scale-down. HPA resources are not currently supplied.

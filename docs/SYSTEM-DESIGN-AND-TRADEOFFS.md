@@ -63,7 +63,7 @@ See [Threat model](THREAT-MODEL.md) for known security gaps, including credentia
 | Workload | State | Current deployment shape |
 |---|---|---|
 | Dashboard | Static assets in the image; browser state in the client | 1 replica by default; safe to add replicas behind its Service |
-| Gateway | Request handlers are stateless; durable app data in PostgreSQL; upstream connection/health caches and rate counters are process-local | 1 replica by default; horizontal replicas are possible with caveats below |
+| Gateway | Request handlers are stateless; durable app data, rate-limit buckets, and short-lived OAuth flow state in PostgreSQL; upstream connection/health caches remain process-local | 2 replicas in dev/prod values (chart default 1) |
 | `woo-mcp` | Request-oriented service; WooCommerce data stays in WordPress | 1 replica by default; can be replicated if the store can handle the added request load |
 | PostgreSQL | Durable gateway state on a PVC | One StatefulSet pod and one `ReadWriteOnce` PVC; no HA/failover configuration |
 | WordPress | Files, plugins, uploads on a PVC; store database in MariaDB | One replica with `Recreate` strategy and `ReadWriteOnce` storage |
@@ -77,7 +77,9 @@ Gateway schema initialization uses a PostgreSQL advisory lock to prevent concurr
 - Gateway readiness uses `/readyz`; liveness uses `/healthz`. Dashboard and `woo-mcp` expose `/healthz` readiness/liveness endpoints.
 - Gateway periodically checks enabled upstream tool lists. An unavailable upstream is marked unreachable without taking down other integrations.
 - Upstream list and call operations have timeouts. A failing upstream affects its calls, not the entire gateway process.
-- `/mcp` has a default per-key request limit of 120 requests/minute. The counter is process-local, not shared between gateway replicas.
+- `/mcp` has a default per-member request limit of 120 requests/minute. Failed-login and MCP rate-limit buckets are stored in PostgreSQL and shared across gateway replicas; bucket keys are hashed and stale rows are periodically pruned.
+- Upstream OAuth state is persisted briefly in PostgreSQL; its PKCE verifier is encrypted and the state is consumed once. This lets the callback complete on any ready gateway replica.
+- Database connections are pooled per replica (`DATABASE_POOL_MAX`, default 10). Total possible gateway connections are approximately replica count × pool maximum, before other clients.
 - When a member's visible tool list exceeds `TOOL_DISCOVERY_THRESHOLD` (default 30), the gateway can expose `kmcp__search_tools` and `kmcp__call_tool` instead of the full list.
 - Gateway `/metrics` returns Prometheus text metrics on port 8080. It is deliberately not routed by the public Ingress; scrape it from inside the cluster or through an explicitly secured monitoring path.
 - Use Kubernetes events, pod logs, readiness, and the dashboard audit page together. The audit log explains tool outcomes; metrics aggregate service behavior.
@@ -92,7 +94,7 @@ Gateway schema initialization uses a PostgreSQL advisory lock to prevent concurr
 
 `infra/aws/k3s` provisions two EC2 instances, a security group, and an Elastic IP. k3s installation is a separate operator step. `scripts/bootstrap.sh` creates Secrets, installs Argo CD, and applies the root app. Argo CD watches `gitops/apps`; the kube-mcp application deploys `charts/stack` with `values-prod.yaml`. GitHub Actions build and publish application images and update the production references.
 
-These files provide a small self-managed deployment pattern, not an HA production platform. Storage, backups, monitoring, TLS, secrets management, and resource sizing need to be reviewed for each real environment.
+Dev and prod values request two gateway replicas. The chart spreads them across node hostnames when possible and creates a PDB requiring one available gateway pod for voluntary disruption. These files provide a small self-managed deployment pattern, not an HA production platform: PostgreSQL remains a single instance and a gateway outage still occurs if its database is unavailable. Storage, backups, monitoring, TLS, secrets management, and resource sizing need to be reviewed for each real environment.
 
 ## Key design decisions and tradeoffs
 
@@ -105,6 +107,7 @@ These files provide a small self-managed deployment pattern, not an HA productio
 | Store upstream secrets encrypted in PostgreSQL | Dashboard does not reveal credentials; DB-only read is less useful | Encryption key is stored in the same cluster Secret boundary |
 | WooCommerce REST API from a separate service | No `kubectl exec` access to WordPress; narrow service path | Requires WooCommerce REST credentials and OAuth 1.0a signing |
 | Single-instance databases and local PVCs | Simple local and small-cluster operations | No database HA; node loss can mean downtime or data loss |
+| PostgreSQL-backed shared limits and OAuth flows | Behavior is consistent across gateway replicas | Adds database writes to rate-limited requests; PostgreSQL becomes more important as gateway traffic grows |
 | Argo CD reconciles production config from Git | Deployments are reviewable and repeatable | A Git change can trigger rollout; protect branches and workflow credentials |
 
 For capacity guidance and safe replica changes, see [Operations and scaling](OPERATIONS-AND-SCALING.md). Network boundaries and policy enforcement details are in [Networking](NETWORKING.md).

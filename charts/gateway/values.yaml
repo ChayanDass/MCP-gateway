@@ -14,6 +14,10 @@ replicas:
   gateway: 1
   dashboard: 1
 
+# Maximum PostgreSQL connections per gateway pod. Budget total connections as
+# gateway replicas * databasePoolMax, plus administration and other clients.
+databasePoolMax: 10
+
 storage:
   className: standard
   postgresSize: 2Gi

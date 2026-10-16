@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "./config.js";
-import { decrypt } from "./crypto.js";
+import { decrypt, encrypt } from "./crypto.js";
 import { pool } from "./db.js";
 
 // Generic OAuth authorization-code flow for connecting a member's own account to
@@ -27,11 +27,9 @@ interface PendingFlow {
   serverId: string;
   providerSlug: string;
   verifier: string;
-  expiresAt: number;
 }
 
 const FLOW_TTL_MS = 10 * 60 * 1000;
-const pending = new Map<string, PendingFlow>();
 
 export async function loadProvider(slug: string): Promise<OAuthProvider | null> {
   const { rows } = await pool.query<OAuthProvider>(`SELECT * FROM oauth_providers WHERE slug = $1`, [slug]);
@@ -51,13 +49,16 @@ function redirectUri(slug: string): string {
   return `${config.publicBaseUrl.replace(/\/$/, "")}/api/oauth/${slug}/callback`;
 }
 
-export function startFlow(p: OAuthProvider, userId: string, serverId: string): string {
-  const now = Date.now();
-  for (const [k, v] of pending) if (v.expiresAt < now) pending.delete(k);
-
+export async function startFlow(p: OAuthProvider, userId: string, serverId: string): Promise<string> {
   const state = randomBytes(24).toString("base64url");
   const verifier = randomBytes(32).toString("base64url");
-  pending.set(state, { userId, serverId, providerSlug: p.slug, verifier, expiresAt: now + FLOW_TTL_MS });
+  const expiresAt = new Date(Date.now() + FLOW_TTL_MS);
+  const stateHash = createHash("sha256").update(state).digest("hex");
+  await pool.query(
+    `INSERT INTO upstream_oauth_flows (state_hash, user_id, server_id, provider_slug, verifier_enc, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [stateHash, userId, serverId, p.slug, encrypt(verifier), expiresAt],
+  );
 
   const url = new URL(p.authorize_url);
   url.searchParams.set("client_id", p.client_id);
@@ -72,11 +73,26 @@ export function startFlow(p: OAuthProvider, userId: string, serverId: string): s
 }
 
 // Returns the flow the state belongs to, and consumes it (single use).
-export function finishFlow(providerSlug: string, state: string): PendingFlow | null {
-  const flow = pending.get(state);
-  pending.delete(state);
-  if (!flow || flow.providerSlug !== providerSlug || flow.expiresAt < Date.now()) return null;
-  return flow;
+export async function finishFlow(providerSlug: string, state: string): Promise<PendingFlow | null> {
+  const stateHash = createHash("sha256").update(state).digest("hex");
+  const { rows } = await pool.query<{ user_id: string; server_id: string; provider_slug: string; verifier_enc: string }>(
+    `DELETE FROM upstream_oauth_flows
+      WHERE state_hash = $1 AND provider_slug = $2 AND expires_at > now()
+      RETURNING user_id, server_id, provider_slug, verifier_enc`,
+    [stateHash, providerSlug],
+  );
+  const flow = rows[0];
+  if (!flow) {
+    // Also discard expired or mismatched state, if any, so it cannot accumulate.
+    await pool.query(`DELETE FROM upstream_oauth_flows WHERE state_hash = $1`, [stateHash]);
+    return null;
+  }
+  return {
+    userId: flow.user_id,
+    serverId: flow.server_id,
+    providerSlug: flow.provider_slug,
+    verifier: decrypt(flow.verifier_enc),
+  };
 }
 
 function getPath(obj: unknown, path: string): unknown {

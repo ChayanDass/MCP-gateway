@@ -1,0 +1,13 @@
+{{- if gt (int .Values.replicas.gateway) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 6 }}
+{{- end }}

@@ -10,6 +10,7 @@ const required = (name: string): string => {
 export const config = {
   port: Number(process.env.PORT ?? 8080),
   databaseUrl: required("DATABASE_URL"),
+  databasePoolMax: Number(process.env.DATABASE_POOL_MAX ?? 10),
   // 32-byte key, base64. Encrypts upstream credentials at rest.
   encryptionKey: required("ENCRYPTION_KEY"),
   bootstrapAdminEmail: required("BOOTSTRAP_ADMIN_EMAIL"),

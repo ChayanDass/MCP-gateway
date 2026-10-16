@@ -29,6 +29,9 @@ store:
 gateway:
   publicBaseUrl: https://kube-mcp.13.200.126.173.nip.io
   imagePullPolicy: IfNotPresent
+  replicas:
+    gateway: 2
+  databasePoolMax: 10
   images:
     gateway: ghcr.io/chayandass/kube-mcp/gateway:bdb66150035352c9608b1d8be9095d21f828047d
     dashboard: ghcr.io/chayandass/kube-mcp/dashboard:bdb66150035352c9608b1d8be9095d21f828047d

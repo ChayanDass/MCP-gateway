@@ -1,7 +1,7 @@
 import pg from "pg";
 import { config } from "./config.js";
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.databasePoolMax });
 
 // Idempotent schema. A real rollout would use a migration tool; for this
 // project the schema is small and applied at startup.
@@ -43,6 +43,11 @@ export async function migrate(): Promise<void> {
       user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       expires_at timestamptz NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+      bucket_key text PRIMARY KEY,
+      request_count integer NOT NULL,
+      window_started_at timestamptz NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS mcp_servers (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       slug text UNIQUE NOT NULL CHECK (slug ~ '^[a-z0-9-]+$'),
@@ -54,6 +59,15 @@ export async function migrate(): Promise<void> {
       is_system boolean NOT NULL DEFAULT false,
       created_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS upstream_oauth_flows (
+      state_hash text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      server_id uuid NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+      provider_slug text NOT NULL,
+      verifier_enc text NOT NULL,
+      expires_at timestamptz NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS upstream_oauth_flows_expiry_idx ON upstream_oauth_flows (expires_at);
     ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS chat_enabled boolean NOT NULL DEFAULT false;
     ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS auth_mode text NOT NULL DEFAULT 'static' CHECK (auth_mode IN ('static', 'oauth'));
     CREATE TABLE IF NOT EXISTS user_oauth_tokens (

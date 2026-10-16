@@ -29,6 +29,13 @@ spec:
         {{- include "mcp.labels" . | nindent 8 }}
         {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 8 }}
     spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 14 }}
       securityContext:
         runAsNonRoot: true
         seccompProfile: { type: RuntimeDefault }
@@ -45,6 +52,8 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: postgres-password } }
             - name: DATABASE_URL
               value: postgres://gateway:$(POSTGRES_PASSWORD)@postgres:5432/gateway
+            - name: DATABASE_POOL_MAX
+              value: {{ .Values.databasePoolMax | quote }}
             - name: ENCRYPTION_KEY
               valueFrom: { secretKeyRef: { name: {{ .Values.secrets.name }}, key: gateway-encryption-key } }
             - name: BOOTSTRAP_ADMIN_EMAIL

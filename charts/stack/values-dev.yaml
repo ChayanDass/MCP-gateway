@@ -14,6 +14,9 @@ store:
 gateway:
   publicBaseUrl: http://localhost
   imagePullPolicy: IfNotPresent
+  replicas:
+    gateway: 2
+  databasePoolMax: 10
   images:
     gateway: gateway:0.2.4
     dashboard: dashboard:0.8.1

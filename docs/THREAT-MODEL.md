@@ -36,10 +36,10 @@ This note covers what the gateway protects, who might attack it, the controls in
 - **Sessions** last 12 hours, in an HttpOnly, SameSite=Strict cookie. Revoking a member's access deletes their sessions at once.
 - **API keys** are 32 random bytes, shown once, and stored as SHA-256 hashes. A member revokes their own keys. Revoking access rejects every key on the next call (`identityFromApiKey` checks `NOT disabled`).
 - **OAuth tokens** for MCP clients use PKCE (S256). Access tokens are short-lived, and refresh tokens rotate on use and last 30 days. Upstream sign-in flows expire after 10 minutes.
-- **Sign-in attempts** are throttled to 10 failures per client address in 15 minutes (`api.ts`).
-- **MCP calls** are limited to 120 per minute per key by default (`ratelimit.ts`). Each replica counts on its own.
+- **Sign-in attempts** are throttled to 10 failures per client address in 15 minutes (`api.ts`); the hashed-IP bucket is stored in PostgreSQL and shared across gateway replicas.
+- **MCP calls** are limited to 120 per minute per member by default (`ratelimit.ts`); hashed member buckets are stored in PostgreSQL and shared across gateway replicas.
 
-**Gap:** the sign-in throttle is per IP address, so an attacker with many addresses can keep guessing. There is no per-account lockout. The MCP rate limit is per replica, so it is approximate. API keys never expire.
+**Gap:** the sign-in throttle is per IP address, so an attacker with many addresses can keep guessing. There is no per-account lockout. The shared limits depend on PostgreSQL availability and add database writes to limited requests. API keys never expire.
 
 ### 3. Member upstream tokens
 
@@ -134,7 +134,7 @@ An admin can change any setting, read the audit log and reset passwords. That's 
 ## Summary of gaps
 
 1. Upstream credentials can be decrypted by anyone who can read the gateway's Secret and the database.
-2. Sign-in is throttled per IP only, with no per-account lockout. The MCP rate limit is per replica.
+2. Sign-in is throttled per IP only, with no per-account lockout. Shared rate limiting depends on PostgreSQL availability.
 3. API keys never expire.
 4. Tool descriptions from untrusted servers are passed through unchecked.
 5. DNS rebinding is not blocked by the SSRF check.

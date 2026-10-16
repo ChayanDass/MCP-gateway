@@ -1,4 +1,4 @@
-import { takeToken } from "./ratelimit.js";
+import { clearRateLimit, isRateLimited, takeToken } from "./ratelimit.js";
 import { recordRateLimited } from "./metrics.js";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
@@ -35,25 +35,16 @@ const SLUG_RE = /^[a-z0-9-]{2,40}$/;
 // attempts are refused until the window passes.
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 10;
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-
-function loginBlocked(ip: string): boolean {
-  const entry = loginAttempts.get(ip);
-  if (!entry) return false;
-  if (Date.now() > entry.resetAt) {
-    loginAttempts.delete(ip);
-    return false;
-  }
-  return entry.count >= LOGIN_MAX_FAILURES;
+function loginRateLimitKey(ip: string): string {
+  return `login:${ip}`;
 }
 
-function recordFailedLogin(ip: string): void {
-  const entry = loginAttempts.get(ip);
-  if (!entry || Date.now() > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
-  } else {
-    entry.count += 1;
-  }
+async function loginBlocked(ip: string): Promise<boolean> {
+  return isRateLimited(loginRateLimitKey(ip), LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS);
+}
+
+async function recordFailedLogin(ip: string): Promise<void> {
+  await takeToken(loginRateLimitKey(ip), LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS);
 }
 
 function isSecure(): boolean {
@@ -82,7 +73,7 @@ export function registerApi(app: FastifyInstance): void {
     const user = await identityFromBearer(req.headers.authorization);
     if (user && !can(user, "mcp.use")) return reply.code(403).send({ error: "Your role can't connect MCP clients." });
     if (user) {
-      const limit = takeToken(user.id, config.rateLimitPerMinute);
+      const limit = await takeToken(`mcp:${user.id}`, config.rateLimitPerMinute);
       if (!limit.ok) {
         recordRateLimited("mcp");
         return reply.code(429).header("Retry-After", String(limit.retryAfter)).send({ error: "Too many requests. Try again shortly." });
@@ -101,7 +92,7 @@ export function registerApi(app: FastifyInstance): void {
 
   // ---- Auth -----------------------------------------------------------------
   app.post<{ Body: { email?: string; password?: string } }>("/api/auth/login", async (req, reply) => {
-    if (loginBlocked(req.ip)) {
+    if (await loginBlocked(req.ip)) {
       return reply.code(429).send({ error: "Too many sign-in attempts. Try again in a few minutes." });
     }
     const { email = "", password = "" } = req.body ?? {};
@@ -112,10 +103,10 @@ export function registerApi(app: FastifyInstance): void {
     const u = rows[0];
     const ok = u && u.password_hash && !u.disabled && (await verifyPassword(password, u.password_hash));
     if (!ok) {
-      recordFailedLogin(req.ip);
+      await recordFailedLogin(req.ip);
       return reply.code(401).send({ error: "Invalid email or password" });
     }
-    loginAttempts.delete(req.ip);
+    await clearRateLimit(loginRateLimitKey(req.ip));
     const token = await createSession(u.id);
     reply.header("Set-Cookie", sessionCookie(token, isSecure()));
     return identityById(u.id);
@@ -142,7 +133,7 @@ export function registerApi(app: FastifyInstance): void {
   // Only existing, enabled gateway users can sign in this way: Google never
   // creates an account here, so admins still decide who has access.
   app.post<{ Body: { credential?: string } }>("/api/auth/google", async (req, reply) => {
-    if (loginBlocked(req.ip)) {
+    if (await loginBlocked(req.ip)) {
       return reply.code(429).send({ error: "Too many sign-in attempts. Try again in a few minutes." });
     }
     const credential = req.body?.credential ?? "";
@@ -151,7 +142,7 @@ export function registerApi(app: FastifyInstance): void {
     try {
       profile = await verifyGoogleCredential(credential);
     } catch (e) {
-      recordFailedLogin(req.ip);
+      await recordFailedLogin(req.ip);
       return reply.code(401).send({ error: e instanceof Error ? e.message : "Google sign-in failed" });
     }
     const { rows } = await pool.query<{ id: string; disabled: boolean }>(
@@ -160,10 +151,10 @@ export function registerApi(app: FastifyInstance): void {
     );
     const u = rows[0];
     if (!u || u.disabled) {
-      recordFailedLogin(req.ip);
+      await recordFailedLogin(req.ip);
       return reply.code(403).send({ error: `No gateway account for ${profile.email}. Ask an admin to add you.` });
     }
-    loginAttempts.delete(req.ip);
+    await clearRateLimit(loginRateLimitKey(req.ip));
     const token = await createSession(u.id);
     reply.header("Set-Cookie", sessionCookie(token, isSecure()));
     return identityById(u.id);
@@ -804,7 +795,7 @@ export function registerApi(app: FastifyInstance): void {
     }
     const provider = await loadProviderById(server.provider_id);
     if (!provider || !providerReady(provider)) return reply.code(400).send({ error: `${provider?.name ?? "This provider"} is not configured yet` });
-    return reply.redirect(startFlow(provider, user.id, req.params.id));
+    return reply.redirect(await startFlow(provider, user.id, req.params.id));
   });
 
   // Callback: the provider sends the member back with a code. The state was issued
@@ -814,7 +805,7 @@ export function registerApi(app: FastifyInstance): void {
     async (req, reply) => {
       const back = (q: string) => reply.redirect(`/#/servers?${q}`);
       if (req.query.error) return back("oauth=failed&reason=denied");
-      const flow = req.query.state ? finishFlow(req.params.provider, req.query.state) : null;
+      const flow = req.query.state ? await finishFlow(req.params.provider, req.query.state) : null;
       if (!flow || !req.query.code) return back("oauth=failed&reason=expired");
       const provider = await loadProvider(req.params.provider);
       if (!provider) return back("oauth=failed&reason=unknown_provider");

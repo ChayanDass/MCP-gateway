@@ -7,6 +7,7 @@ import { registerApi, serveDashboard } from "./api.js";
 import { registerOAuthRoutes } from "./oauth-server.js";
 import formbody from "@fastify/formbody";
 import { upstreams } from "./upstreams.js";
+import { startSharedStateCleanup } from "./ratelimit.js";
 
 // Startup is idempotent: schema, the first admin and the WooCommerce system
 // server are created only when missing, so restarts and Helm upgrades are safe.
@@ -70,10 +71,12 @@ async function main(): Promise<void> {
   });
 
   upstreams.start();
+  const sharedStateCleanup = startSharedStateCleanup();
   await app.listen({ port: config.port, host: "0.0.0.0" });
 
   const stop = async () => {
     upstreams.stop();
+    clearInterval(sharedStateCleanup);
     await app.close();
     await pool.end();
     process.exit(0);
