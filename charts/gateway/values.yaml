@@ -36,8 +36,8 @@ bootstrapAdminEmail: admin@example.com
 # Hostnames the gateway may reach even under a denied pattern.
 upstreamHostAllowlist: []
 
-# Google sign-in for the dashboard. Pass the client ID at install time with
-# --set-string auth.googleClientId=... so it stays out of the repo.
+# Google sign-in for the dashboard. The stack supplies this public client ID
+# from values-dev.yaml or values-prod.yaml.
 auth:
   googleClientId: ""
   googleAllowedDomains: ""

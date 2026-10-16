@@ -2,7 +2,7 @@
 # Hostnames: nip.io names that point at the server's IP. Replace with your domain later.
 # Each hostname gets a Let's Encrypt certificate (cert-manager, ClusterIssuer letsencrypt-prod).
 # The bare IP gets a self-signed certificate (secret kube-mcp/ip-tls), so browsers warn for it.
-# Use: helm install kube-mcp charts/stack -f charts/stack/values-secrets.yaml -f charts/stack/values-prod.yaml
+# Use: helm install kube-mcp charts/stack -f charts/stack/values-prod.yaml
 
 ingress-nginx:
   controller:

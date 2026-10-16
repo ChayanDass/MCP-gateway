@@ -122,13 +122,13 @@ Nothing secret is in git. Passwords are generated once and stored in Kubernetes 
 | Gateway encryption key | Secret `gateway-secrets`, key `gateway-encryption-key` | Never print it. Losing it makes stored upstream credentials unreadable |
 | Database passwords | Secrets `store-secrets` and `gateway-secrets` | Used by the apps; not needed by people |
 | Stored upstream credentials (GitHub, Slack, OpenRouter) | The gateway's Postgres, encrypted with the encryption key | Entered in the dashboard; never shown again |
-| Google OAuth client ID | `charts/stack/values-prod.yaml` (or `values-secrets.yaml` locally) | It is public, so it can be in git |
+| Google OAuth client ID | `charts/stack/values-dev.yaml` locally; `charts/stack/values-prod.yaml` on AWS | It is public, so it can be in git |
 
 **Changing a password:**
 - The dashboard admin password: sign in and change it in the app. The Secret keeps the install-time value, so it then only records the original.
 - The store admin password: change it in WordPress (**Users → Profile**).
 
-**Local files that are git-ignored, never commit them:** `charts/stack/values-secrets.yaml`, `.env`, and anything under `~/.config`.
+**Local files that are git-ignored, never commit them:** `.env` and anything under `~/.config`.
 
 ## Sign-in flows
 
@@ -318,7 +318,7 @@ Not built yet: multi-store provisioning, and hosted MCP servers deployed from co
 
 **Locally:**
 ```sh
-helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-secrets.yaml -f charts/stack/values-dev.yaml
+helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-dev.yaml
 helm rollback kube-mcp <revision>
 ```
 

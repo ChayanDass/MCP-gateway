@@ -143,10 +143,8 @@ kubectl -n default run np-test --image=woo-mcp:0.1.0 --image-pull-policy=IfNotPr
 The charts in `charts/stack` install the same stack in one release, with `charts/stack/values-dev.yaml` for local use and `values-prod.yaml` for AWS. The local Helm path was last checked before the roles and permissions change, so verify it before relying on it:
 
 ```sh
-helm install kube-mcp charts/stack -n kube-mcp --create-namespace -f charts/stack/values-secrets.yaml -f charts/stack/values-dev.yaml
+helm install kube-mcp charts/stack -n kube-mcp --create-namespace -f charts/stack/values-dev.yaml
 ```
-
-`charts/stack/values-secrets.example.yaml` lists the one value that isn't generated: the Google OAuth client ID.
 
 ## Troubleshooting
 

@@ -59,9 +59,8 @@ jobs:
           helm lint charts/stack -f charts/stack/values-prod.yaml
       - name: Render with dev and prod values
         run: |
-          # The example secrets file has placeholders, which is enough to render.
-          helm template kube-mcp charts/stack -f charts/stack/values-secrets.example.yaml -f charts/stack/values-dev.yaml > /tmp/dev.yaml
-          helm template kube-mcp charts/stack -f charts/stack/values-secrets.example.yaml -f charts/stack/values-prod.yaml > /tmp/prod.yaml
+          helm template kube-mcp charts/stack -f charts/stack/values-dev.yaml > /tmp/dev.yaml
+          helm template kube-mcp charts/stack -f charts/stack/values-prod.yaml > /tmp/prod.yaml
           # Every rendered object must be valid YAML.
           python3 -c "import yaml,sys; [print(len(list(yaml.safe_load_all(open(f))))) for f in ['/tmp/dev.yaml','/tmp/prod.yaml']]"
 
@@ -97,7 +96,7 @@ jobs:
           helm repo update
           helm dependency build charts/stack
           helm install kube-mcp charts/stack -n kube-mcp --create-namespace \
-            -f charts/stack/values-secrets.example.yaml -f charts/stack/values-dev.yaml \
+            -f charts/stack/values-dev.yaml \
             --set ingress-nginx.controller.admissionWebhooks.enabled=false \
             --wait --timeout 25m || {
               kubectl -n kube-mcp get pods -o wide; kubectl -n kube-mcp describe pods | tail -60; exit 1; }

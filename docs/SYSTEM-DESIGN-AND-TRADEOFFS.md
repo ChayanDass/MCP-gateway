@@ -131,6 +131,6 @@ The local cluster (`yamls/`) uses three namespaces. The AWS cluster (`charts/sta
 
 - **DNS and TLS:** `charts/stack/values-prod.yaml` sets the hostnames, and cert-manager issues Let's Encrypt certificates. Replace the `nip.io` names with a real domain, and set `PUBLIC_BASE_URL` to match. Google's authorized origins must match the HTTPS address.
 - **Storage:** local-path volumes stay on one node. A multi-node cluster needs a networked storage class.
-- **Secrets:** generated on first install. `charts/stack/values-secrets.yaml` is git-ignored. For a shared cluster, create the Secrets yourself and reference them.
+- **Secrets:** generated on first install by the charts or bootstrap scripts. For a shared cluster, create the Kubernetes Secrets yourself and reference them.
 - **Database:** the gateway migrates the schema on startup. Take a `pg_dump` before any upgrade that changes the schema.
 - **Upgrades and rollback:** see the README section *Upgrades and rollback*. Argo CD rolls back by reverting the deploy commit.
