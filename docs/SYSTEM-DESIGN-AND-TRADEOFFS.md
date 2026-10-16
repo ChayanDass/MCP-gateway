@@ -1,136 +1,110 @@
 # System design and tradeoffs
 
-This note describes how the system is built today, how a request moves through it, how it fails, and why the main choices were made. Each part points to the code that implements it.
+This document describes the system implemented in this repository and how it is deployed today. It separates implemented behavior from future scaling options.
 
-## Components
+## Components and technology
 
-| Component | Responsibility | Code |
+| Component | Technology | Responsibility |
 |---|---|---|
-| Store | WordPress 7.0.4, WooCommerce and MariaDB 11.4 in the `store` namespace | `charts/store`, `yamls/store` |
-| woo-mcp | MCP server (Streamable HTTP) that exposes products and orders as tools. Only the gateway can reach it. | `services/woo-mcp` |
-| Gateway | Accounts, roles, permissions, API keys, audit log, chat agent, OAuth server for MCP clients. It is also an MCP client to every upstream server. | `services/gateway` |
-| Dashboard | React single-page app for admins and members. Static files from nginx; API calls go to the gateway. | `dashboard` |
-| Postgres | Gateway state: users, roles, keys (hashed), sessions, server registry, encrypted upstream credentials, audit log | `charts/gateway`, `yamls/Gateway` |
-| Ingress | Routes `/api`, `/mcp`, `/oauth` and `/.well-known` to the gateway, and everything else to the dashboard | `charts/ingress`, `yamls/Gateway/04-ingress.yaml` |
+| Dashboard | React 19, TypeScript, Vite, Tailwind CSS; unprivileged nginx container | Browser UI for members and administrators; static files only, API calls go to the gateway |
+| Gateway | Node.js 22, TypeScript, Fastify, MCP SDK | Browser/API auth, MCP client aggregation, authorization, chat orchestration, upstream management, audit, and metrics |
+| Gateway database | PostgreSQL 16 | Members, roles, sessions, API keys (hashes), OAuth records, server configuration, encrypted credentials, chat state, and audit data |
+| WooCommerce MCP | Node.js 22, TypeScript, MCP Streamable HTTP | Exposes selected WooCommerce operations to the gateway; accesses WooCommerce using signed REST calls |
+| Store | WordPress 7 with WooCommerce, MariaDB 11.4 | Demo storefront, catalog, accounts, and orders |
+| Ingress | ingress-nginx | Host/path routing; terminates TLS in the production-like deployment |
+| Cluster packaging | Helm, Kind locally, k3s on AWS; Argo CD for production-like GitOps | Installs and reconciles the same chart set with environment values |
 
-Two sign-in paths reach the gateway, and they are kept apart:
-- **The dashboard** uses a session cookie: HttpOnly, SameSite=Strict, valid 12 hours. Members sign in with a password or Google. The dashboard never uses an API key.
-- **MCP clients** (Claude Code, Cursor, and similar) use a bearer credential: either a member's API key (`kmcp_…`), or an OAuth access token from the browser login flow (PKCE, S256).
+The full Helm release places the charts in the `kube-mcp` namespace. The alternate `yamls/` deployment uses multiple namespaces and is maintained separately; it is not the layout produced by `scripts/init.sh`.
 
-## Authorization model
+## Main request flows
 
-Permissions are the unit of control, and roles bundle them. The list is in `services/gateway/src/permissions.ts`. The dashboard reads the same list from `GET /api/permissions`, so one entry adds a permission everywhere.
+### Browser
 
-| Permission | Lets a user |
-|---|---|
-| `members.manage` | Create, edit, revoke and delete members, set their roles, server access and passwords |
-| `roles.manage` | Create and edit roles |
-| `tools.manage` | Set per-tool rules, for servers and for members |
-| `servers.manage` | Add, edit, turn off and remove MCP servers |
-| `providers.manage` | Configure sign-in providers for upstream OAuth servers |
-| `model.manage` | Choose the chat model and provider |
-| `servers.full_access` | Use every server and tool without per-server grants |
-| `audit.view_all` | See every audit entry; otherwise only their own |
-| `chat.use` | Use the dashboard chat agent |
-| `mcp.use` | Create API keys and connect MCP clients |
+1. Browser loads the static React app from the dashboard Service through ingress-nginx.
+2. The app calls same-origin `/api` routes through the same ingress host.
+3. The gateway validates the session cookie, checks permissions on the server, reads or writes PostgreSQL, and returns the response.
 
-Two roles are built in. **Admin** has every permission and cannot be edited or deleted. **Member** has `chat.use` and `mcp.use`, plus the server grants an admin gives them. Admins create custom roles on the Roles & permissions page.
+Dashboard sessions use HttpOnly, SameSite cookies. Password sign-in is built in; Google sign-in is optional and uses a public OAuth client ID. Dashboard access does not use MCP API keys.
 
-A permission is checked in three places: each API route checks it before doing work (`currentUser(req, reply, "…")`), the dashboard hides pages the user can't use, and the MCP endpoint refuses a user without `mcp.use`. The server check is the one that matters; the dashboard only hides controls.
+### MCP client tool call
 
-## How a tool call travels
+1. Client sends a Streamable HTTP MCP request to `/mcp` with a member API key or an OAuth access token.
+2. Gateway resolves the identity and current authorization from PostgreSQL. Permissions are not frozen in an API key.
+3. Gateway maps the prefixed tool name (for example `woocommerce__list_products`) to its configured upstream.
+4. It checks global tool rules, role capabilities, server grants, and per-member tool rules before forwarding the call.
+5. It sends only the upstream's shared credential or the member's own OAuth token. The gateway credential is never forwarded upstream.
+6. For WooCommerce, `woo-mcp` signs a REST request to WordPress, which reads or updates MariaDB.
+7. Gateway returns the result and records the outcome, duration, user, server, and tool in the audit log.
 
-1. An MCP client sends `tools/call` to `/mcp` with its bearer credential. The gateway resolves the credential to a user and their permissions. A revoked user or a revoked key fails here.
-2. The gateway decides whether the call is allowed, and records why (`explainCall` in `access.ts`). The order is:
-   1. the tool is blocked for everyone by an admin → denied;
-   2. the role has `servers.full_access` → allowed;
-   3. the member has no grant to the server → denied;
-   4. the member has a per-tool deny → denied; a per-tool allow → allowed;
-   5. a third-party server → allowed, since the server's own token limits it;
-   6. a system server (WooCommerce) → read tools need a read grant, write tools need a read and write grant.
-3. The gateway finds the upstream from the tool's prefix: `woocommerce__list_products` goes to the server with slug `woocommerce`.
-4. It opens or reuses a Streamable HTTP connection with the upstream's own credential. For browser sign-in servers, the member's own upstream token is used, and only for their calls. The member's gateway credential is never forwarded.
-5. woo-mcp calls WordPress's REST API, signed with OAuth 1.0a. WordPress reads MariaDB.
-6. The result goes back through the gateway, and an audit row is written with user, server, tool, duration and outcome.
+### Dashboard chat
 
-The same decision function serves the tool-permissions page, so the page shows what the gateway enforces, with the reason.
+Chat requests use the signed-in member identity. The gateway asks the configured OpenAI-compatible or Anthropic model to select from tools the member can use. Tool calls run through the same authorization and audit path as external MCP calls. The agent has a bounded tool loop and limits returned tool text.
 
-## Naming, timeouts and failure handling
+## Identity and authorization layers
 
-- **Tool names** are `<server slug>__<tool>`. Two servers can each have `list_items` without a clash, and the model sees which server a tool belongs to.
-- **Health:** every 15 s (`HEALTH_INTERVAL_MS`) the gateway lists each enabled upstream. A failure marks it `unreachable` and keeps its error text. Other servers keep working.
-- **Timeouts:** listing waits up to 15 s (`UPSTREAM_LIST_TIMEOUT_MS`), and each call up to 15 s (`UPSTREAM_CALL_TIMEOUT_MS`). A slow upstream returns a clear error to the caller only.
-- **Connections** are cached per server and credential. A changed credential opens a new connection, and a dead one is dropped.
-- **Chat** stops after 8 tool steps, and each tool result is cut to 3,000 characters, so a loop or a large result can't exhaust it.
-- **Login** is throttled: 10 failed attempts per client address in 15 minutes.
-- **Rate limit:** `/mcp` allows 120 requests per minute per key by default (`RATE_LIMIT_PER_MINUTE`). The count is kept per replica, so with N replicas the real limit can be up to N times higher.
-- **Tool discovery:** when a member can see more than 30 tools (`TOOL_DISCOVERY_THRESHOLD`), `/mcp` lists two meta tools instead: `kmcp__search_tools` and `kmcp__call_tool`. The model searches, then calls the tool it found. Each call still goes through the same permission check, and search only returns tools the member can use.
-- **Metrics:** each audited call updates counters for its server and outcome, latency, rate-limit refusals and upstream health. They are served at `/metrics` inside the cluster.
+- **Roles** bundle named permissions such as `servers.manage`, `members.manage`, `chat.use`, and `mcp.use`.
+- **Server grants** give a member no access, read access, or read/write access to a server.
+- **Tool rules** allow or deny a specific tool for a member. Explicit deny takes precedence; an explicit allow can permit a tool outside the ordinary server-level grant, so administrators should use it carefully.
+- **Global tool rules** can block a tool for everyone.
 
-## Kubernetes layout
+The gateway enforces access on each request. Dashboard navigation and controls are hidden where possible, but UI hiding is not the security boundary. The permission registry is in `services/gateway/src/permissions.ts`; the decision logic is in `services/gateway/src/access.ts`.
 
-The local cluster (`yamls/`) uses three namespaces. The AWS cluster (`charts/stack`) puts everything in one, `kube-mcp`.
+MCP client authentication is separate from browser sign-in:
 
-| Workload | Namespace | Image | Port | Probes | Requests | Limits | Storage | Reached from |
-|---|---|---|---|---|---|---|---|---|
-| WordPress | store | `wordpress:7.0.4-php8.3-apache` | 80 | `/wp-login.php` (readiness and liveness) | 250m, 384Mi | 1 CPU, 768Mi | 5Gi PVC | Ingress, `store.localtest.me` |
-| MariaDB | store | `mariadb:11.4` | 3306 | `mariadb-admin ping` | 100m, 256Mi | 500m, 768Mi | 5Gi PVC | WordPress and the setup Job only |
-| Setup Job | store | `wordpress:cli-php8.3` | — | none (runs once) | 100m, 256Mi | 500m, 512Mi | shares the WordPress PVC | Nothing; it runs and exits |
-| woo-mcp | store | `woo-mcp` | 8080 | `/healthz` | 50m, 64Mi | 300m, 192Mi | none | The gateway only |
-| Postgres | gateway | `postgres:16-alpine` | 5432 | `pg_isready` | 250m, 256Mi | 500m, 512Mi | 2Gi PVC | The gateway only |
-| Gateway | gateway | `gateway` | 8080 | `/healthz`, `/readyz` (readiness checks the database) | 100m, 128Mi | 200m, 256Mi | none | Ingress (`/api`, `/mcp`, `/oauth`, `/.well-known`) and the dashboard |
-| Dashboard | gateway | `dashboard` (nginx, unprivileged) | 8080 | `/healthz` | 10m, 16Mi | 100m, 64Mi | none | Ingress (`/`) |
-| Ingress controller | ingress-nginx | `ingress-nginx/controller` | 80, 443 | the controller's own | — | — | — | The internet, on the host ports |
+- API keys are generated randomly, shown once, stored as SHA-256 hashes, and revocable.
+- The gateway's MCP OAuth server supports browser authorization with PKCE and rotating refresh tokens.
+- Dashboard passwords use scrypt; browser sessions are persisted in PostgreSQL.
+- Upstream OAuth access tokens and shared upstream credentials are encrypted with AES-256-GCM using a key in `gateway-secrets`.
 
-**Secrets:** `store-secrets` (database and WordPress passwords) and `woo-mcp-credentials` (the WooCommerce key) in `store`; `gateway-secrets` (Postgres password, encryption key, bootstrap admin password) in `gateway`. Secrets are read as environment variables, and nothing secret is in a manifest.
+See [Threat model](THREAT-MODEL.md) for known security gaps, including credential-key co-location and delegated permission escalation.
 
-**Security context:** the gateway, woo-mcp and the dashboard run as a non-root user, with privilege escalation off and all capabilities dropped. The gateway and woo-mcp images run as uid 1000; the dashboard image runs unprivileged. The store and database images keep their own users.
+## Runtime and state boundaries
 
-**Public and internal:** only the ingress controller is reachable from outside. Everything else is a `ClusterIP` service, and each one is limited by a NetworkPolicy (see [NETWORKING.md](NETWORKING.md), section 9).
-
-**Migrations:** the gateway creates or changes its schema at startup, under a Postgres advisory lock, so two replicas can't migrate at once.
-
-## Key decisions
-
-**Dashboard on sessions, MCP on keys.** A browser can hold a cookie safely; a client config file cannot. Keeping them apart means a leaked key can't be used to reach the dashboard, and a session can't be copied into a client.
-
-**Keys are created by the member, shown once, and stored as SHA-256 hashes.** Keys are 32 random bytes, so a salted slow hash would add cost without protection. Members revoke their own keys; admins cannot see or revoke other members' keys, only revoke their access. The earlier design, where the gateway kept an encrypted copy of each key so it could be shown again, was removed.
-
-**Permissions live in roles, server access per member, and tool rules per member.** Roles answer "what kind of user is this?"; server grants answer "which servers?"; tool rules answer "which exact tools?". Each layer can only narrow the one above, except the explicit allow rule, which can widen a tool the server grant doesn't cover. That makes allow the one sharp edge, so the reason column names it.
-
-**Permission checks happen on every request, not in the token.** A key or session carries no permissions. A change to a role or a member takes effect on the next call, with no re-issue. The cost is one database lookup per request.
-
-**Prefixed tool names, not MCP namespaces.** The MCP spec has no namespaces, and clients show a flat list. A prefix is the simplest form that works everywhere, and it doubles as the routing key. The cost is that renaming a server renames its tools.
-
-**Postgres for gateway state.** Users, roles, keys, sessions, the audit log and encrypted credentials need queries and transactions. Schema changes run at startup under an advisory lock, so two replicas can't migrate at once.
-
-**WooCommerce REST API, not WP-CLI.** woo-mcp speaks HTTP only. It needs no `kubectl exec` into WordPress, so it can run in its own namespace with a narrow network policy, and it works the same locally and on AWS. The cost is OAuth 1.0a signing, which `woo.ts` implements.
-
-**Network policies default-deny per namespace.** Each allowed path is one explicit rule (the store and gateway charts). The local cluster uses Calico, because kind's default CNI doesn't enforce policies.
-
-**Stateless MCP endpoint.** Each request builds its own MCP server and transport, so any replica can answer and a restart loses no session. Upstream connections are per replica.
-
-**GitOps for AWS.** Argo CD syncs `charts/stack` with `values-prod.yaml`, with automatic prune and self-heal. The image workflow builds only the images whose code changed, and then commits the new tags into the charts, so a deployment is a commit.
-
-## Tradeoffs
-
-| Choice | What we get | What it costs |
+| Workload | State | Current deployment shape |
 |---|---|---|
-| Permissions checked per request | Changes apply immediately; no stale tokens | One database lookup per request |
-| Sessions for the dashboard, keys for clients | Each credential fits its client | Two credential types to explain and to protect |
-| Keys never expire | Clients keep working without a renewal step | A leaked key stays valid until someone revokes it |
-| Hashes only, no recoverable key copy | A database leak doesn't reveal keys | A lost key can't be shown again; the member makes a new one |
-| Single Postgres, single WordPress on a `ReadWriteOnce` volume | Simple, and correct for one store | WordPress uses `Recreate`, so each upgrade causes downtime; no HA |
-| Health by re-listing tools every 15 s | Reports real capability | Detection can lag 15 s; a dead upstream costs one timeout per cycle |
-| Tool descriptions passed to the model as-is | Clients see the real descriptions | An untrusted server can put instructions in them |
-| Hostname-only SSRF check | Blocks loopback, metadata and private names | Doesn't stop DNS rebinding |
-| Monogram logos | No third-party files fetched | Less recognisable than real logos |
-| Raw manifests in `yamls/` next to the Helm charts | Easy to check each step locally | Two copies to keep in step; the charts are the deliverable |
+| Dashboard | Static assets in the image; browser state in the client | 1 replica by default; safe to add replicas behind its Service |
+| Gateway | Request handlers are stateless; durable app data in PostgreSQL; upstream connection/health caches and rate counters are process-local | 1 replica by default; horizontal replicas are possible with caveats below |
+| `woo-mcp` | Request-oriented service; WooCommerce data stays in WordPress | 1 replica by default; can be replicated if the store can handle the added request load |
+| PostgreSQL | Durable gateway state on a PVC | One StatefulSet pod and one `ReadWriteOnce` PVC; no HA/failover configuration |
+| WordPress | Files, plugins, uploads on a PVC; store database in MariaDB | One replica with `Recreate` strategy and `ReadWriteOnce` storage |
+| MariaDB | Durable WooCommerce data on a PVC | One StatefulSet pod and one `ReadWriteOnce` PVC; no replication/failover configured |
+| Store setup Job | Idempotent initialization work | Runs as a Helm post-install/post-upgrade hook and exits on success |
 
-## What changes for production
+Gateway schema initialization uses a PostgreSQL advisory lock to prevent concurrent migration runs. An application rollback does not automatically roll back database schema or restore data; take backups before upgrades that change persistence behavior.
 
-- **DNS and TLS:** `charts/stack/values-prod.yaml` sets the hostnames, and cert-manager issues Let's Encrypt certificates. Replace the `nip.io` names with a real domain, and set `PUBLIC_BASE_URL` to match. Google's authorized origins must match the HTTPS address.
-- **Storage:** local-path volumes stay on one node. A multi-node cluster needs a networked storage class.
-- **Secrets:** generated on first install by the charts or bootstrap scripts. For a shared cluster, create the Kubernetes Secrets yourself and reference them.
-- **Database:** the gateway migrates the schema on startup. Take a `pg_dump` before any upgrade that changes the schema.
-- **Upgrades and rollback:** see the README section *Upgrades and rollback*. Argo CD rolls back by reverting the deploy commit.
+## Failure behavior and observability
+
+- Gateway readiness uses `/readyz`; liveness uses `/healthz`. Dashboard and `woo-mcp` expose `/healthz` readiness/liveness endpoints.
+- Gateway periodically checks enabled upstream tool lists. An unavailable upstream is marked unreachable without taking down other integrations.
+- Upstream list and call operations have timeouts. A failing upstream affects its calls, not the entire gateway process.
+- `/mcp` has a default per-key request limit of 120 requests/minute. The counter is process-local, not shared between gateway replicas.
+- When a member's visible tool list exceeds `TOOL_DISCOVERY_THRESHOLD` (default 30), the gateway can expose `kmcp__search_tools` and `kmcp__call_tool` instead of the full list.
+- Gateway `/metrics` returns Prometheus text metrics on port 8080. It is deliberately not routed by the public Ingress; scrape it from inside the cluster or through an explicitly secured monitoring path.
+- Use Kubernetes events, pod logs, readiness, and the dashboard audit page together. The audit log explains tool outcomes; metrics aggregate service behavior.
+
+## Deployment paths
+
+### Local development
+
+`scripts/init.sh` creates Kind using `infra/kind/kind.yaml`, builds the three application images locally, imports them into the Kind node, and installs `charts/stack` with `values-dev.yaml`. Default Kind networking uses kindnet and does not enforce NetworkPolicy. An optional Calico Kind config and pinned manifest are provided for policy testing; see [Setup](SETUP.md).
+
+### Production-like deployment
+
+`infra/aws/k3s` provisions two EC2 instances, a security group, and an Elastic IP. k3s installation is a separate operator step. `scripts/bootstrap.sh` creates Secrets, installs Argo CD, and applies the root app. Argo CD watches `gitops/apps`; the kube-mcp application deploys `charts/stack` with `values-prod.yaml`. GitHub Actions build and publish application images and update the production references.
+
+These files provide a small self-managed deployment pattern, not an HA production platform. Storage, backups, monitoring, TLS, secrets management, and resource sizing need to be reviewed for each real environment.
+
+## Key design decisions and tradeoffs
+
+| Decision | Benefit | Cost or limit |
+|---|---|---|
+| One gateway endpoint with per-call authorization | Central policy, audit, and client configuration | Gateway and PostgreSQL are critical dependencies |
+| Separate browser sessions and MCP keys | Credentials fit their clients; keys do not grant dashboard sessions | Users manage two sign-in methods |
+| Check authorization on every request | Role and grant changes take effect immediately | Each operation needs database-backed identity/permission checks |
+| Prefix tool names with server slug | Simple flat tool list and routing | Renaming a server changes client-visible tool names |
+| Store upstream secrets encrypted in PostgreSQL | Dashboard does not reveal credentials; DB-only read is less useful | Encryption key is stored in the same cluster Secret boundary |
+| WooCommerce REST API from a separate service | No `kubectl exec` access to WordPress; narrow service path | Requires WooCommerce REST credentials and OAuth 1.0a signing |
+| Single-instance databases and local PVCs | Simple local and small-cluster operations | No database HA; node loss can mean downtime or data loss |
+| Argo CD reconciles production config from Git | Deployments are reviewable and repeatable | A Git change can trigger rollout; protect branches and workflow credentials |
+
+For capacity guidance and safe replica changes, see [Operations and scaling](OPERATIONS-AND-SCALING.md). Network boundaries and policy enforcement details are in [Networking](NETWORKING.md).

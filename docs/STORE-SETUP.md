@@ -1,5 +1,7 @@
 # Store setup (WooCommerce, standard tooling only)
 
+The Helm `store-setup` Job configures WordPress, installs and activates WooCommerce, sets the demo store options, imports sample products when the catalog is empty, and registers the REST key used by `woo-mcp`. The instructions below are for manual administration or the alternate raw-manifest deployment. The public local ingress listens on port 80; do not add `:8080` to these URLs.
+
 The store is configured with WP-CLI and WooCommerce's own commands and options.
 No custom code is used. Run the commands inside the WordPress pod as `www-data`:
 
@@ -78,9 +80,9 @@ download directories, so it may not be downloadable.
 
 ## 6. Verify
 
-- Storefront: http://store.localtest.me:8080 (products on `/shop/`)
-- Admin: http://store.localtest.me:8080/wp-admin/ (user `admin`; password in the `wp-admin-password` Secret)
-- Account: http://store.localtest.me:8080/my-account/ (login and registration)
+- Storefront: http://store.localtest.me (products on `/shop/`)
+- Admin: http://store.localtest.me/wp-admin/ (user `admin`; password in the `wp-admin-password` Secret)
+- Account: http://store.localtest.me/my-account/ (login and registration)
 - Orders: WooCommerce > Orders, or `wp wc shop_order list --user=admin`
 
 ## Customer checkout (verified)
@@ -91,4 +93,4 @@ The admin can then change its status (`completed`, etc.) under WooCommerce > Ord
 ## Not done (out of scope)
 
 - Email delivery: the container has no `sendmail`, so WooCommerce's order emails fail.
-- REST API keys: needed for the MCP server. They are created in WooCommerce > Settings > Advanced > REST API.
+- Manual deployments need a WooCommerce REST API key for `woo-mcp`. The Helm setup Job creates and registers it from `woo-mcp-credentials` automatically.

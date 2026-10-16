@@ -1,351 +1,166 @@
 # kube-mcp
 
-A team MCP gateway on Kubernetes. Admins connect MCP servers once. Every team member then reaches all of them through one endpoint, and through a chat agent in the dashboard. The first data source is a WooCommerce store.
+**kube-mcp** is a self-hosted MCP gateway for a team. It connects MCP servers once, then gives members a permission-controlled endpoint, a web dashboard, and an optional chat agent that calls tools as the signed-in member. The included example integration is a WooCommerce store.
 
-It runs in two places with the same Helm charts:
+The same Helm stack supports local development on Kind and a small production-like k3s deployment on AWS. The local setup builds application images from this checkout; production values point at GitHub Container Registry images.
 
-- **Local:** a Kind cluster on your machine, for development.
-- **Production-like:** a k3s cluster on two AWS EC2 instances, with HTTPS and GitOps through Argo CD.
+## What it includes
 
-Browse the codebase on DeepWiki: [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ChayanDass/MCP-gateway)
+- **MCP gateway:** aggregates tools from configured Streamable HTTP MCP servers, routes calls, checks permissions, and records outcomes.
+- **Dashboard:** React app for server configuration, members, roles, per-tool access, client keys, OAuth providers, model settings, chat, and audit history.
+- **Identity and authorization:** password and Google sign-in, browser sessions, API keys, MCP OAuth with PKCE, roles, server grants, and tool rules.
+- **WooCommerce example:** WordPress, WooCommerce, MariaDB, and a dedicated `woo-mcp` service that exposes store operations to the gateway.
+- **Operations:** Helm charts, local Kind setup, GitHub Actions, Terraform for a two-node AWS k3s environment, and Argo CD GitOps.
 
-## Contents
+## Architecture at a glance
 
-1. [What is in the repo](#what-is-in-the-repo)
-2. [How the system fits together](#how-the-system-fits-together)
-3. [Network and addresses](#network-and-addresses)
-4. [Passwords and secrets](#passwords-and-secrets)
-5. [Sign-in flows](#sign-in-flows)
-6. [Run it locally](#run-it-locally)
-7. [Run it on AWS](#run-it-on-aws)
-8. [Use it](#use-it)
-9. [Connect an external MCP client](#connect-an-external-mcp-client)
-10. [Add and manage MCP servers](#add-and-manage-mcp-servers)
-11. [Permissions, keys and audit](#permissions-keys-and-audit)
-12. [What is built beyond the core](#what-is-built-beyond-the-core)
-13. [Upgrades and rollback](#upgrades-and-rollback)
-14. [Troubleshooting](#troubleshooting)
-15. [More documentation](#more-documentation)
-
-## What is in the repo
-
-| Path | What it is |
-|---|---|
-| `charts/stack` | The whole stack as one Helm chart: ingress controller, store, MCP server, gateway, dashboard and ingress rules. Dev and prod values |
-| `charts/store` | WordPress, WooCommerce, MariaDB, and the setup Job that configures the store |
-| `charts/mcp` | The WooCommerce MCP server (`woo-mcp`) |
-| `charts/gateway` | The gateway, the dashboard and the gateway's Postgres |
-| `charts/ingress` | Ingress rules for the store and dashboard hostnames |
-| `services/woo-mcp` | The WooCommerce MCP server: Node, Streamable HTTP, five tools |
-| `services/gateway` | The gateway: MCP aggregation, routing, permissions, audit, chat agent, OAuth |
-| `dashboard` | The React dashboard |
-| `infra/kind` | Kind cluster configuration |
-| `infra/aws/k3s` | Terraform for the two EC2 instances running k3s |
-| `infra/aws/argocd` | Argo CD settings |
-| `gitops` | Argo CD applications: the root app, cert-manager, the ClusterIssuer and the stack |
-| `scripts/init.sh` | One-command local setup |
-| `scripts/bootstrap.sh` | One-time setup for a GitOps cluster: secrets, certificate, Argo CD |
-| `yamls/` | Plain Kubernetes manifests for the local Kind cluster: store, MCP server, gateway, dashboard, ingress and network policies |
-| `docs/` | Setup, store steps, networking, system design and tradeoffs, threat model |
-| `.github/workflows` | CI: tests, image builds, chart publishing |
-
-## How the system fits together
-
-```
-Browser / MCP client / chat agent
-        |
-        v
-  Ingress (ingress-nginx)  ---- /api, /mcp, /oauth, /.well-known ---->  Gateway
-        |                                                                  |
-        | dashboard and store hostnames                                    | MCP client to each upstream
-        v                                                                  v
-  Dashboard (static)                          WooCommerce MCP  --->  WordPress (REST API) --> MariaDB
-  WordPress (store)                           GitHub, Slack, docs servers (hosted, over HTTPS)
+```mermaid
+flowchart LR
+  Browser[Browser] --> Ingress[Ingress controller]
+  Client[MCP client] --> Ingress
+  Ingress -->|/ serves app| Dashboard[Dashboard]
+  Ingress -->|/api /mcp /oauth| Gateway[Gateway]
+  Dashboard -->|same-origin API| Ingress
+  Gateway --> PG[(PostgreSQL)]
+  Gateway --> WooMCP[WooCommerce MCP]
+  Gateway --> Other[MCP servers: GitHub, Slack, docs, etc.]
+  WooMCP -->|WooCommerce REST API| WP[WordPress]
+  WP --> Maria[(MariaDB)]
 ```
 
-- **The store** is WordPress with WooCommerce. It keeps its data in MariaDB and its files in a persistent volume.
-- **The WooCommerce MCP server** is the only component that talks to the store's REST API. It is reachable only from the gateway.
-- **The gateway** is the single MCP endpoint. It connects to every enabled upstream server, lists their tools with a `server__tool` name, routes each call to the right server, enforces permissions, and writes the audit log. It also serves the dashboard API and runs the chat agent.
-- **The dashboard** is a React app. It manages servers, members, keys, permissions, providers and the model, and shows the audit log.
-- **The chat agent** runs in the gateway. It calls tools as the logged-in user, so its calls are audited under that user.
+The gateway is the policy enforcement point. It authenticates each call, resolves the member's current permissions, selects the upstream, and writes an audit event. A gateway credential is not forwarded upstream; configured shared credentials or the member's own upstream OAuth token are used instead. See [System design](docs/SYSTEM-DESIGN-AND-TRADEOFFS.md) for request flows, state, tradeoffs, and scaling limits.
 
-## Network and addresses
+## Run locally on Kind
 
-### Local (Kind)
+### Prerequisites
 
-| Address | What it reaches |
-|---|---|
-| `http://store.localtest.me` | The store, on port 80 of your machine |
-| `http://localhost` | The dashboard and the gateway API, on port 80 |
-| `http://kube-mcp.localtest.me` | The same dashboard |
+Install Docker, Kind, kubectl, and Helm. The local ingress binds host port **80**; it must be available. The bootstrap script creates a single-node Kind cluster named `kube-mcp` if one does not already exist.
 
-`*.localtest.me` is a public name that resolves to `127.0.0.1`, so no `/etc/hosts` changes are needed. The Kind cluster maps host port 80 into the ingress controller.
+From the repository root:
 
-### AWS (k3s, two EC2 instances)
-
-| Address | What it reaches |
-|---|---|
-| `https://store.13.200.126.173.nip.io` | The store, with a Let's Encrypt certificate |
-| `https://kube-mcp.13.200.126.173.nip.io` | The dashboard and gateway, with a Let's Encrypt certificate |
-| `https://13.200.126.173` | The store, with a self-signed certificate (browsers warn) |
-
-`nip.io` names point at the server's IP without owning a domain. To use your own domain later, change the hostnames in `charts/stack/values-prod.yaml` and point DNS at the server.
-
-The server has an Elastic IP, `13.200.126.173`. The worker's public address can change, and nothing depends on it.
-
-**Firewall (AWS security group):**
-- Port 22 (SSH) and port 6443 (Kubernetes API): only from your IP.
-- Ports 80 and 443 (web): open to everyone.
-- Ports 6443, 8472 (VXLAN) and 10250 (kubelet): only between the two nodes.
-
-**Inside the cluster:** every component has a NetworkPolicy:
-- The gateway accepts traffic from the ingress controller and the dashboard. The dashboard accepts traffic only from the ingress controller and makes no outbound calls.
-- The WooCommerce MCP server accepts traffic only from the gateway.
-- The gateway's Postgres accepts traffic only from the gateway.
-- MariaDB accepts traffic only from WordPress and the setup job.
-- WordPress accepts traffic only from the ingress controller and the WooCommerce MCP server.
-
-**Argo CD:** it has no public address. Reach it with a port-forward (see [Run it on AWS](#run-it-on-aws)).
-
-## Passwords and secrets
-
-The commands below use the AWS and Helm namespace, `kube-mcp`. On the local Kind cluster the secrets are in `store` (store-secrets, woo-mcp-credentials) and `gateway` (gateway-secrets).
-
-Nothing secret is in git. Passwords are generated once and stored in Kubernetes Secrets. Helm, the bootstrap script and Argo CD never regenerate them, so the databases keep working across upgrades.
-
-| What | Where it is stored | How to read it |
-|---|---|---|
-| Store admin (WordPress `admin`) | Secret `store-secrets`, key `wp-admin-password` | `kubectl -n kube-mcp get secret store-secrets -o jsonpath='{.data.wp-admin-password}' \| base64 -d; echo` |
-| Dashboard and gateway admin (`admin@example.com`) | Secret `gateway-secrets`, key `bootstrap-admin-password` | `kubectl -n kube-mcp get secret gateway-secrets -o jsonpath='{.data.bootstrap-admin-password}' \| base64 -d; echo` |
-| Argo CD admin (`admin`) | Secret `argocd-initial-admin-secret` | `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d; echo` |
-| WooCommerce REST key for woo-mcp | Secret `woo-mcp-credentials` | Created by the bootstrap script; the store setup job registers it |
-| Gateway encryption key | Secret `gateway-secrets`, key `gateway-encryption-key` | Never print it. Losing it makes stored upstream credentials unreadable |
-| Database passwords | Secrets `store-secrets` and `gateway-secrets` | Used by the apps; not needed by people |
-| Stored upstream credentials (GitHub, Slack, OpenRouter) | The gateway's Postgres, encrypted with the encryption key | Entered in the dashboard; never shown again |
-| Google OAuth client ID | `charts/stack/values-dev.yaml` locally; `charts/stack/values-prod.yaml` on AWS | It is public, so it can be in git |
-
-**Changing a password:**
-- The dashboard admin password: sign in and change it in the app. The Secret keeps the install-time value, so it then only records the original.
-- The store admin password: change it in WordPress (**Users → Profile**).
-
-**Local files that are git-ignored, never commit them:** `.env` and anything under `~/.config`.
-
-## Sign-in flows
-
-### Dashboard sign-in
-
-1. **Password:** `admin@example.com` plus the dashboard admin password (see above). Failed sign-ins are rate limited: 10 failures in 15 minutes.
-2. **Google:** the Google button uses your Google account. The gateway verifies Google's signed token against Google's public keys, and checks the client ID, the issuer, the expiry, and that the email is verified. If `GOOGLE_ALLOWED_DOMAINS` is set, only those domains can sign in. No Google secret is used.
-
-For Google sign-in to work, the OAuth client in Google Cloud Console must list the dashboard address under **Authorized JavaScript origins**: `http://localhost` locally, or `https://kube-mcp.13.200.126.173.nip.io` on AWS.
-
-### MCP clients
-
-Clients sign in in one of two ways:
-
-- **API key:** create a key for your account in the dashboard under **Clients**. Send it as `Authorization: Bearer <key>`. Keys are stored hashed and can be revoked at any time.
-- **Browser sign-in (OAuth):** clients that support the MCP authorization flow register themselves, then open a browser for you to sign in. The gateway's OAuth server issues short-lived access tokens and longer-lived refresh tokens.
-
-### Upstream sign-in (GitHub, Slack and other OAuth servers)
-
-An admin sets up the provider once. Then each member connects with their own account:
-
-1. Create the OAuth app in the provider (GitHub, Slack and so on). Its callback URL is `<dashboard address>/api/oauth/<slug>/callback`, for example `https://kube-mcp.13.200.126.173.nip.io/api/oauth/github/callback`.
-2. In the dashboard, go to **Settings → Sign-in providers** and enter the provider's authorize URL, token URL, scopes, client ID and client secret. Slack needs the scope parameter `user_scope` and the token path `authed_user.access_token`. GitHub uses `scope` and `access_token`.
-3. Add the server under **MCP servers**, with **Browser sign-in** and that provider.
-4. Each member opens the server and clicks **Connect**. Their token is stored encrypted, and used only for their own calls.
-
-If a connection shows *Reconnect*, the provider's token has expired or was revoked. Connect again.
-
-## Run it locally
-
-Local development uses Kind with Calico, so the NetworkPolicies are enforced, and the plain manifests in `yamls/`. The full steps, including building and loading the images and creating the secrets, are in [docs/SETUP.md](docs/SETUP.md).
-
-When it's running, open:
-- Store: `http://store.localtest.me`
-- Dashboard: `http://localhost`, signing in as `admin@example.com`
-
-The same stack is also packaged as the Helm charts in `charts/stack`, which AWS uses. `./scripts/init.sh` installs that package locally. It was last checked before the roles and permissions change, so verify it before you rely on it.
-
-## Run it on AWS
-
-### One-time setup
-
-1. **Create the two EC2 instances** with Terraform from `infra/aws/k3s`. Pass your public IP, so SSH and the API accept only your address:
-   ```sh
-   cd infra/aws/k3s
-   terraform init
-   terraform apply -var "admin_cidr=$(curl -s https://checkip.amazonaws.com)/32"
-   ```
-2. **Install k3s** on the server and the worker, pinned to a version so the download comes from GitHub. Join the worker with the server's private address and the node token. The steps are in `docs/SETUP.md`.
-3. **Point kubectl at the cluster** from your machine:
-   ```sh
-   export KUBECONFIG=~/.kube/kube-mcp-aws.yaml
-   kubectl get nodes
-   ```
-4. **Bootstrap the cluster** once. This creates the secrets and the IP certificate, installs Argo CD, and applies the root app:
-   ```sh
-   PUBLIC_IP=13.200.126.173 ./scripts/bootstrap.sh
-   ```
-
-### Ongoing: GitOps
-
-After bootstrap, the cluster follows GitHub. Argo CD watches `gitops/apps` and deploys in order:
-- **Wave 0:** cert-manager.
-- **Wave 1:** the Let's Encrypt ClusterIssuer.
-- **Wave 2:** the stack, from `charts/stack` with `values-prod.yaml`.
-
-To deploy a change, commit and push to `main`. The image workflow builds any changed service and commits its new image tag, and Argo CD rolls it out. Check it in the Argo CD UI, or with `kubectl -n argocd get applications`.
-
-To open the Argo CD UI:
 ```sh
-kubectl -n argocd port-forward svc/argocd-server 9090:443
+./scripts/init.sh
 ```
-Then open `https://localhost:9090` and sign in as `admin`, with the Argo CD password from the table above. Port 9090 is used because 8081 may already be taken on your machine.
 
-### What runs where
+The script builds `woo-mcp:0.1.0`, `gateway:0.2.4`, and `dashboard:0.8.1`, imports them into the Kind node, installs or upgrades the `kube-mcp` Helm release using `charts/stack/values-dev.yaml`, then waits for store initialization and `woo-mcp` readiness.
 
-- **Server node:** the control plane, the ingress controller (ports 80 and 443), and most workloads.
-- **Worker node:** workloads only.
+Open:
 
-Each node has 2 GB of memory plus 2 GB of swap. If pods show `Pending` or restart, check `kubectl top nodes`.
+| URL | Service |
+|---|---|
+| <http://localhost> | Dashboard and gateway API/MCP endpoint |
+| <http://store.localtest.me> | WooCommerce storefront |
+| <http://kube-mcp.localtest.me> | Dashboard alternate hostname |
 
-## Use it
+`localtest.me` resolves to `127.0.0.1`. Sign in to the dashboard as `admin@example.com`. Read the generated bootstrap password without putting it in shell history:
 
-### Place an order on the storefront
+```sh
+kubectl -n kube-mcp get secret gateway-secrets \
+  -o jsonpath='{.data.bootstrap-admin-password}' | base64 -d; echo
+```
 
-1. Open the store and add a product to the cart.
-2. Check out with **Cash on delivery**, the test payment method.
-3. The order appears under **WooCommerce → Orders** in `wp-admin`, and through the gateway's `list_orders` tool.
+The store admin is at <http://store.localtest.me/wp-admin/> with username `admin`. Read its generated password from `store-secrets`:
 
-Customers can register and set their own password on **My account**. No email is sent, because the cluster has no mail server.
+```sh
+kubectl -n kube-mcp get secret store-secrets \
+  -o jsonpath='{.data.wp-admin-password}' | base64 -d; echo
+```
 
-### Use the chat agent
+The local chart configures a public Google OAuth client ID for the `http://localhost` origin. Password sign-in works without Google configuration. See [Local setup](docs/SETUP.md) for cluster checks, image refresh, an optional Calico policy-enforced path, and troubleshooting.
 
-1. Sign in to the dashboard and open **Chat**, or use the **Ask** button at the bottom right.
-2. Ask in plain language, for example "list today's orders" or "create a product called Blue Mug for 12.50".
-3. The agent shows each tool call it makes. Each call is recorded in the audit log under your account.
+### Refresh a local image
 
-The chat model is set in **Settings → Model**. It can be any OpenAI-compatible or Anthropic model, including free OpenRouter models. Models that support tools work best.
+The dev image tags use `IfNotPresent`; after rebuilding an image with the same tag, import it and restart the matching deployment so Kubernetes starts a new pod:
 
-### Use the dashboard
+```sh
+docker build --provenance=false --sbom=false -t dashboard:0.8.1 dashboard
+docker save --platform linux/amd64 dashboard:0.8.1 | \
+  docker exec -i kube-mcp-control-plane ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
+kubectl -n kube-mcp rollout restart deployment/dashboard
+kubectl -n kube-mcp rollout status deployment/dashboard --timeout=3m
+```
 
-- **Overview:** server status, recent calls and errors, and the model in use.
-- **MCP servers:** a card per server, with its status and tool count. Open one to see its tools and, with *Set up MCP servers*, its settings.
-- **Clients:** your keys and the setup for each client. Create a key here for an MCP client; the key is shown once.
-- **Chat:** ask in plain language. The agent calls tools as you, and each call is audited under your account.
-- **Security:** members, roles and permissions, per-tool rules, and the audit log.
-- **Settings:** sign-in providers and the chat model.
-- **Theme:** the sidebar switch cycles light, dark and system. Your choice is saved in the browser.
+Use the equivalent build context, tag, and deployment name for `gateway` or `woo-mcp`. The direct import form also works with Docker installations where `kind load docker-image` cannot create its temporary directory.
 
-Each page shows only what your role allows. The server checks the same permissions on every request.
+## Access and use
 
-## Connect an external MCP client
+### Dashboard
 
-The gateway's MCP address is `<dashboard address>/mcp`:
+The **Overview** shows gateway and tool activity. **MCP servers** manages upstream connections. **Clients** creates and revokes personal MCP keys. **Chat** uses the configured model and the current member's allowed tools. **Security** manages members, roles, tool permissions, and audit history. **Settings** configures OAuth providers and the chat model. The mobile navigation selector exposes the same pages on small screens.
+
+Customers can use the storefront and register through **My account**. The demo cluster does not include an email server, so WooCommerce email delivery is not configured.
+
+### MCP endpoint
+
+The endpoint is `/mcp` on the dashboard host:
+
 - Local: `http://localhost/mcp`
-- AWS: `https://kube-mcp.13.200.126.173.nip.io/mcp`
+- Production: the HTTPS dashboard host configured in `charts/stack/values-prod.yaml`, followed by `/mcp`
 
-Add it to your client with your key as a Bearer token. For example, in Claude Code:
+Create an API key from **Clients** and configure the MCP client to send it as a Bearer token. Example:
 
 ```sh
-claude mcp add --transport http kube-mcp https://kube-mcp.13.200.126.173.nip.io/mcp \
-  --header "Authorization: Bearer <your key>"
+claude mcp add --transport http kube-mcp http://localhost/mcp \
+  --header "Authorization: Bearer <your-key>"
 ```
 
-The client sees every tool your account may call. Tools you can't use are left out of the list.
+Keys are shown only once and stored hashed. OAuth-capable MCP clients can use the gateway's browser authorization flow instead.
 
-## Add and manage MCP servers
+### Add an upstream MCP server
 
-In the dashboard, go to **MCP servers → Add MCP server** (needs the *Set up MCP servers* permission), and enter a name, a slug, and the URL of a Streamable HTTP server. Choose either:
-- **Shared:** an optional header or bearer credential, used by the gateway for everyone.
-- **Browser sign-in:** each member connects with their own account. See [Upstream sign-in](#upstream-sign-in-github-slack-and-other-oauth-servers).
+An administrator with `servers.manage` opens **MCP servers → Add MCP server**, provides a slug and Streamable HTTP URL, and configures either shared credentials or a supported per-member OAuth provider. Tool names are prefixed with the server slug, for example `woocommerce__list_products`. Each call still goes through the gateway's permission check.
 
-You can edit, disable or remove a server. Disabling it removes its tools from the chat and from clients straight away.
+### Google sign-in and other OAuth providers
 
-Tool names are prefixed with the server's slug, for example `woocommerce__list_products` and `github__list_issues`. Two servers can each have a tool with the same name without clashing.
+Google sign-in needs the exact dashboard origin in the Google OAuth client's **Authorized JavaScript origins**. For local development, that origin is `http://localhost`. Upstream OAuth callbacks use:
 
-A server that can't be reached shows as *Unreachable*. The other servers keep working.
-
-The servers set up now are WooCommerce, GitHub and Slack (per-member sign-in), and Context7 and DeepWiki (public, no key).
-
-## Permissions, keys and audit
-
-**Permissions are granted through roles.** Each role is a named set of permissions, and each member has one role. The full list is in `services/gateway/src/permissions.ts`:
-
-| Permission | Lets a member |
-|---|---|
-| Manage members | Create, edit, revoke and delete members, and set their role, server access and password |
-| Manage roles | Create and edit roles |
-| Set tool permissions | Allow or block individual tools, per member |
-| Set up MCP servers | Add, edit, turn off and remove servers |
-| Set up sign-in providers | Configure providers for upstream OAuth servers |
-| Set up the model | Choose the chat model |
-| Use every server | Skip per-server grants |
-| See everyone's audit log | See all audit entries, not only their own |
-| Use the chat agent | Ask questions in the dashboard |
-| Connect MCP clients | Create keys for MCP clients |
-
-Two roles are built in. **Admin** has every permission and can't be edited or deleted. **Member** can use chat and MCP clients, and gets server access from an admin. Admins create custom roles under **Security → Roles & permissions**.
-
-- **Server access:** each member gets *none*, *read* or *write* for each server. For WooCommerce, read covers listing products and orders, and write adds product creation and order status changes.
-- **Per-tool rules:** an admin can set a tool to *default*, *allow* or *deny* for one member. Deny always wins. **Tool permissions** shows the result for each tool, with the reason, from the same check the gateway uses.
-- **Keys:** a member creates and revokes their own keys under **Clients**. Keys are for MCP clients only; the dashboard signs in with a session and needs no key. A revoked key is rejected on the next call.
-- **Audit log:** every tool call records the user, the server, the tool, the time, the duration and the outcome. Denied calls and failed sign-ins are recorded too.
-
-The gateway never sends a member's key or the upstream credentials to upstream servers. Upstream calls use the server's own credential, or the member's own OAuth token for browser-sign-in servers.
-
-The threat model lists the open gaps, including what a member with *Manage members* can currently grant: see [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
-
-## What is built beyond the core
-
-| Feature | Where to find it |
-|---|---|
-| Tool permissions with reasons, per member and per tool | Security → Tool permissions; `services/gateway/src/access.ts` |
-| Custom roles and a permission registry | Security → Roles & permissions; `services/gateway/src/permissions.ts` |
-| OAuth for MCP clients (browser sign-in, PKCE, rotating refresh tokens) | `services/gateway/src/oauth-server.ts` |
-| Upstream OAuth per member (GitHub, Slack) | Settings → Sign-in providers |
-| Security hardening: SSRF checks, encrypted credentials, non-root containers, default-deny network policies | `ssrf.ts`, `crypto.ts`, the manifests and charts, [docs/NETWORKING.md](docs/NETWORKING.md) |
-| Production on AWS with GitOps | `infra/aws/k3s`, `gitops/`, `charts/stack/values-prod.yaml` |
-| Upgrades and rollback with Helm and Argo CD | Upgrades and rollback, below |
-| Tool discovery for large tool lists | `services/gateway/src/mcp.ts`: when a member has more than `TOOL_DISCOVERY_THRESHOLD` tools (default 30), `/mcp` offers `kmcp__search_tools` and `kmcp__call_tool` instead of the full list |
-| Rate limit per key on `/mcp` | `services/gateway/src/ratelimit.ts`: `RATE_LIMIT_PER_MINUTE` (default 120), per replica; refused calls get HTTP 429 |
-| Metrics: tool calls, outcomes, latency, rate limits, upstream health | `GET /metrics` on the gateway, Prometheus text format. It is not routed by the ingress, so only pods inside the cluster can scrape it |
-
-Not built yet: multi-store provisioning, and hosted MCP servers deployed from container images.
-
-## Upgrades and rollback
-
-**Locally:**
-```sh
-helm upgrade kube-mcp charts/stack -n kube-mcp -f charts/stack/values-dev.yaml
-helm rollback kube-mcp <revision>
+```text
+<dashboard-origin>/api/oauth/<provider-slug>/callback
 ```
 
-**On AWS:** change the chart or the code, commit to `main`, and let Argo CD roll it out. To roll back, revert the commit and push; Argo CD follows the revert.
+For example, use `http://localhost/api/oauth/github/callback` locally. Provider client secrets are entered in the dashboard and stored encrypted by the gateway.
 
-Helm keeps the generated passwords, so an upgrade or rollback doesn't break the databases. Don't uninstall the release unless you want the data gone.
+## Environments and deployment
 
-## Troubleshooting
+| Environment | Deployment | Values and images | Ingress / TLS |
+|---|---|---|---|
+| Local | Kind + Helm, release `kube-mcp` in namespace `kube-mcp` | `charts/stack/values-dev.yaml`; application images built locally | ingress-nginx on host port 80; HTTP |
+| Production-like | k3s on AWS EC2 + Argo CD | `charts/stack/values-prod.yaml`; versioned GHCR images | Public ingress; cert-manager and HTTPS |
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Store or dashboard unreachable locally | Kind not running, or port 80 in use | `kind get clusters`; free port 80 |
-| Dashboard shows "Can't reach the gateway" | The gateway pod is restarting | Wait a minute, then *Try again* |
-| WooCommerce tools say "Invalid signature" | The gateway signs with the store's public address, `WOO_HOME_URL`, and it doesn't match | Set `WOO_HOME_URL` to the store's address (for example `http://store.localtest.me`), then restart woo-mcp |
-| Google sign-in shows `origin_mismatch` | The dashboard address isn't in the OAuth client | Add it under *Authorized JavaScript origins* |
-| A provider sign-in shows `redirect_uri_mismatch` | The callback URL in the provider doesn't match | Use `<dashboard address>/api/oauth/<slug>/callback` |
-| A provider sign-in shows `insufficient scopes` | The provider has no scopes | Set the scopes in *Sign-in providers*, then reconnect |
-| A server shows *Reconnect* | Its token expired or was revoked | Click *Connect* again |
-| Argo CD shows `OutOfSync` or `Progressing` | A sync or a hook is still running | Wait; check `kubectl -n kube-mcp get pods` |
-| Pods `Pending` on AWS | Not enough memory on the nodes | `kubectl top nodes`; reduce requests or add a node |
-| Certificate stays not ready | Let's Encrypt can't reach port 80 | Check the security group and the ingress controller |
-| Gateway restarts with `relation ... does not exist` | A database migration ran in the wrong order | Update the gateway image; the migration order is fixed in `db.ts` |
+`charts/stack/values.yaml` contains shared defaults; environment-specific public settings and image references belong in the dev and prod values files. Runtime credentials are Kubernetes Secrets, not Helm values committed to Git. The GitHub image workflow publishes images and updates production image tags; Argo CD watches Git and syncs the stack. AWS provisioning and first bootstrap are documented in [Setup and operations](docs/SETUP.md).
 
-## More documentation
+## Security and network policies
 
-- [docs/SETUP.md](docs/SETUP.md): the detailed local setup, with the manual steps.
-- [docs/STORE-SETUP.md](docs/STORE-SETUP.md): the WP-CLI steps that configure the store.
-- [docs/NETWORKING.md](docs/NETWORKING.md): addresses, the ingress, certificates, `nip.io`, the firewall, and local versus AWS.
-- [docs/SYSTEM-DESIGN-AND-TRADEOFFS.md](docs/SYSTEM-DESIGN-AND-TRADEOFFS.md): how the system is built, how a tool call travels, and why the main choices were made.
-- [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md): assets, actors, controls, and the open gaps.
+Only the ingress controller is intended to receive external traffic. The dashboard, gateway, databases, and MCP service use in-cluster Services. NetworkPolicy resources restrict selected **ingress** paths; they do not currently restrict egress. Enforcement depends on the cluster CNI: k3s enforces policies, and the optional Kind Calico setup does; the default Kind cluster created by `scripts/init.sh` uses kindnet, which does not enforce NetworkPolicy. Do not treat those policy objects as an isolation boundary on default Kind networking.
+
+See [Networking](docs/NETWORKING.md) for ports, request paths, TLS, firewall rules, and the exact policy rules. See the [Threat model](docs/THREAT-MODEL.md) for controls and known gaps.
+
+## Scaling and current limits
+
+The web and MCP services are containerized and some replica counts are Helm-configurable, but this repository does not define HPAs, PodDisruptionBudgets, distributed rate limiting, or a highly available database. Gateway request rate limits are held per process, so adding replicas multiplies the effective limit. PostgreSQL, MariaDB, and WordPress each run as one replica with single-node persistent storage; they are not made highly available by scaling the gateway. Read [Operations and scaling](docs/OPERATIONS-AND-SCALING.md) before increasing replicas or moving beyond the demo/small-team deployment.
+
+## Repository map
+
+| Path | Purpose |
+|---|---|
+| `services/gateway` | Gateway API, MCP aggregation, identity, permissions, chat, OAuth, and metrics |
+| `services/woo-mcp` | WooCommerce MCP server |
+| `dashboard` | React dashboard and nginx image |
+| `charts/stack` | Full Helm release and dev/prod values |
+| `charts/{gateway,mcp,store,ingress}` | Component Helm charts and templates |
+| `yamls/` | Alternate plain Kubernetes manifests for manual local setup |
+| `infra/kind` | Kind network configurations and Calico manifest |
+| `infra/aws/k3s` | Terraform for the AWS k3s nodes and security group |
+| `gitops/` | Argo CD root, platform, and application definitions |
+| `.github/workflows` | Build, chart, and Kind deployment checks; image publishing |
+| `scripts/init.sh` | One-command local Kind + Helm installation |
+| `scripts/bootstrap.sh` | One-time AWS cluster secret, certificate, Argo CD, and GitOps bootstrap |
+
+## Documentation
+
+- [Local setup and deployment](docs/SETUP.md)
+- [System design and tradeoffs](docs/SYSTEM-DESIGN-AND-TRADEOFFS.md)
+- [Operations, capacity, and scaling](docs/OPERATIONS-AND-SCALING.md)
+- [Networking, ingress, and policies](docs/NETWORKING.md)
+- [Store setup](docs/STORE-SETUP.md)
+- [Threat model and known gaps](docs/THREAT-MODEL.md)

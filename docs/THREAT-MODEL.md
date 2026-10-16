@@ -48,7 +48,7 @@ This note covers what the gateway protects, who might attack it, the controls in
 
 ### 4. Store data and the store
 
-- The store's network policies deny ingress by default. MariaDB accepts only WordPress and the setup Job. WordPress accepts only the ingress controller and woo-mcp. woo-mcp accepts only the gateway, and can reach only WordPress. Tested on Calico with allowed and blocked paths.
+- The Helm policy templates isolate ingress to selected pods: MariaDB allows WordPress and the setup Job; WordPress allows ingress-nginx and woo-mcp; woo-mcp allows the gateway; PostgreSQL allows the gateway; and gateway/dashboard allow ingress-nginx. These rules are enforced only by a policy-capable CNI. The default Kind path from `scripts/init.sh` uses kindnet and does not enforce NetworkPolicy; local policy tests require the optional Calico setup. The templates do not restrict egress.
 - Dashboard requests reach the store only through the gateway.
 
 **Gap:** the WordPress admin password is one credential that controls the whole store. It is stored in a Secret; rotating it is a manual step.
@@ -120,7 +120,7 @@ Next steps: show each description to the admin when the server is added, and fla
 - Only the ingress controller is exposed. Every other service is `ClusterIP`.
 - The ingress routes only the gateway and dashboard paths. Admin APIs require a session with the right permission.
 - The gateway sends a Content-Security-Policy header. The dashboard's nginx does not set one.
-- Network policies stop pods from reaching anything they don't need (tested locally).
+- Network policies restrict the listed inbound paths when the cluster CNI enforces them. They do not currently restrict egress, and the default Kind networking path does not enforce them.
 - The gateway, woo-mcp and the dashboard run as non-root with privilege escalation off and all capabilities dropped (`yamls/` and the charts).
 
 **Gap:** on the VPS the bare IP serves a self-signed certificate, which browsers warn about.
