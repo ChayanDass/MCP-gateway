@@ -129,7 +129,20 @@ export function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </div>
         </div>
 
-        <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Main">
+        <nav className="flex flex-col gap-1 md:overflow-visible" aria-label="Main">
+          <label className="sr-only" htmlFor="mobile-navigation">Navigate to a page</label>
+          <select
+            id="mobile-navigation"
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground md:hidden"
+            value={active}
+            onChange={(event) => navigate(event.target.value)}
+          >
+            {visible.flatMap((n) =>
+              isGroup(n)
+                ? [<optgroup key={n.key} label={n.label}>{n.items.map((i) => <option key={i.key} value={i.key}>{i.label}</option>)}</optgroup>]
+                : [<option key={n.key} value={n.key}>{n.label}</option>],
+            )}
+          </select>
           {visible.map((n) =>
             isGroup(n) ? (
               <div key={n.key} className="hidden md:block">

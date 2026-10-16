@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, can, type Me } from "./api";
 import { Logo } from "./Logo";
 import { navigate } from "./router";
-import { ClassBadge, EmptyState, Panel } from "./shared";
+import { ClassBadge, EmptyState, Loading, Panel } from "./shared";
 
 interface Overview {
   servers: { total: number; enabled: number; connected: number; system: number };
@@ -23,47 +24,101 @@ export function OverviewPage({ me }: { me: Me }) {
   const canMembers = can(me, "members.manage");
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const requestInFlight = useRef(false);
 
-  useEffect(() => {
-    const load = () => api<Overview>("GET", "/api/overview").then(setData).catch((e) => setError(e.message));
-    load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
+  const load = useCallback(async (background = false) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    if (!background) setRefreshing(true);
+    try {
+      const next = await api<Overview>("GET", "/api/overview");
+      setData(next);
+      setError(null);
+      setUpdatedAt(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load overview");
+    } finally {
+      requestInFlight.current = false;
+      if (!background) setRefreshing(false);
+    }
   }, []);
 
-  if (error) return <p className="text-sm text-destructive">{error}</p>;
-  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  useEffect(() => {
+    void load(true);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(true);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  if (!data && error) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-5" role="alert">
+        <p className="font-medium">Overview could not be loaded</p>
+        <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+        <Button className="mt-4" variant="outline" onClick={() => void load()} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /> Try again
+        </Button>
+      </div>
+    );
+  }
+
+  if (!data) return <Loading lines={7} />;
 
   const stats = [
     { label: "Servers connected", value: `${data.servers.connected}/${data.servers.enabled}`, hint: `${data.servers.total} added · for you`, go: "servers" },
-    { label: "Tools available to you", value: String(data.tools), hint: "after permissions", go: "servers" },
-    { label: "Calls, last 24 h", value: String(data.calls24h), hint: `${data.errors24h} failed · ${data.denied24h} denied`, go: "security/audit" },
+    { label: "Tools available to you", value: String(data.tools), hint: "After permission rules", go: "servers" },
+    { label: "Calls, last 24 hours", value: String(data.calls24h), hint: `${data.errors24h} failed · ${data.denied24h} denied`, go: "security/audit" },
     canMembers && data.members
       ? { label: "Active members", value: String(data.members.active), hint: `${data.members.admins} admin${data.members.admins === 1 ? "" : "s"}`, go: "security/members" }
-      : { label: "Your role", value: me.role, hint: "per-server rules apply", go: "overview" },
+      : { label: "Your role", value: me.role, hint: "Per-server rules apply", go: "overview" },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={refreshing}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {updatedAt ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Refreshing overview…"}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+          Refresh
+        </Button>
+      </div>
+
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning" role="status">
+          <span>Showing the last loaded data. Refresh failed: {error}</span>
+          <Button variant="ghost" size="sm" onClick={() => void load()} disabled={refreshing}>Retry</Button>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((s) => (
-          <Card key={s.label} className="cursor-pointer gap-2 py-5 transition-colors hover:border-primary/50" onClick={() => navigate(s.go)}>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1">
-              <div className="text-2xl font-semibold tracking-tight">{s.value}</div>
-              <div className="text-xs text-muted-foreground">{s.hint}</div>
-            </CardContent>
-          </Card>
+          <button
+            key={s.label}
+            type="button"
+            className="group rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            onClick={() => navigate(s.go)}
+            aria-label={`${s.label}: ${s.value}. ${s.hint}. Open details.`}
+          >
+            <Card className="h-full gap-2 py-5 transition-colors group-hover:border-primary/50 group-focus-visible:border-primary">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="break-words text-2xl font-semibold tracking-tight">{s.value}</div>
+                <div className="text-xs text-muted-foreground">{s.hint}</div>
+              </CardContent>
+            </Card>
+          </button>
         ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel
-          title="Model in use"
-          actions={canModel && <Button variant="outline" size="sm" onClick={() => navigate("settings/model")}>Change</Button>}
-        >
+        <Panel title="Model in use" actions={canModel && <Button variant="outline" size="sm" onClick={() => navigate("settings/model")}>Change</Button>}>
           {data.model ? (
             <div className="flex items-center gap-3">
               <Logo id={data.model.provider === "anthropic" ? "anthropic" : hostProvider(data.model.baseUrl)} size={40} />
@@ -90,36 +145,34 @@ export function OverviewPage({ me }: { me: Me }) {
         </Panel>
       </div>
 
-      <Panel title="Recent activity" actions={<Button variant="ghost" size="sm" onClick={() => navigate("security/audit")}>See all</Button>}>
+      <Panel title="Recent activity" description="The latest tool calls recorded by the gateway." actions={<Button variant="ghost" size="sm" onClick={() => navigate("security/audit")}>See all</Button>}>
         {data.recent.length === 0 ? (
-          <EmptyState title="No tool calls yet" body="Connect a client or try the chat." />
+          <EmptyState title="No tool calls yet" body="Connect a client or try the chat to see activity here." />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Tool</TableHead>
-                <TableHead>Via</TableHead>
-                <TableHead>Result</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.recent.map((r, i) => (
-                <TableRow key={i}>
-                  <TableCell className="text-muted-foreground">{new Date(r.ts).toLocaleTimeString()}</TableCell>
-                  <TableCell>{r.user_email}</TableCell>
-                  <TableCell>
-                    <code className="text-xs">{r.server_slug}__{r.tool}</code>
-                  </TableCell>
-                  <TableCell>{r.source}</TableCell>
-                  <TableCell>
-                    <ClassBadge value={r.outcome === "ok" ? "allowed" : r.outcome === "denied" ? "denied" : "blocked"} />
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Tool</TableHead>
+                  <TableHead>Via</TableHead>
+                  <TableHead>Result</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {data.recent.map((r, i) => (
+                  <TableRow key={`${r.ts}-${r.user_email}-${r.server_slug}-${r.tool}-${i}`}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(r.ts).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</TableCell>
+                    <TableCell className="max-w-48 truncate">{r.user_email}</TableCell>
+                    <TableCell><code className="break-all text-xs">{r.server_slug}__{r.tool}</code></TableCell>
+                    <TableCell>{r.source}</TableCell>
+                    <TableCell><ClassBadge value={r.outcome === "ok" ? "allowed" : r.outcome === "denied" ? "denied" : "blocked"} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </Panel>
     </div>
