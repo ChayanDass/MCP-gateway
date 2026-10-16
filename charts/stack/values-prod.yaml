@@ -33,8 +33,8 @@ gateway:
     gateway: 2
   databasePoolMax: 10
   images:
-    gateway: ghcr.io/chayandass/kube-mcp/gateway:03b8746d48347d010bba96bf61ab1f842a7352ab
-    dashboard: ghcr.io/chayandass/kube-mcp/dashboard:03b8746d48347d010bba96bf61ab1f842a7352ab
+    gateway: ghcr.io/chayandass/kube-mcp/gateway:1a416a5df4bc9ba134e1c00f20038a78ef219678
+    dashboard: ghcr.io/chayandass/kube-mcp/dashboard:1a416a5df4bc9ba134e1c00f20038a78ef219678
   # Google OAuth client ID. Public (it appears in the sign-in page), so it can live in git.
   auth:
     googleClientId: "763488963092-29kda33fj5n268ftf8sf2fe1k0ce03rm.apps.googleusercontent.com"
@@ -46,7 +46,7 @@ gateway:
 mcp:
   imagePullPolicy: IfNotPresent
   images:
-    wooMcp: ghcr.io/chayandass/kube-mcp/woo-mcp:03b8746d48347d010bba96bf61ab1f842a7352ab
+    wooMcp: ghcr.io/chayandass/kube-mcp/woo-mcp:1a416a5df4bc9ba134e1c00f20038a78ef219678
   store:
     # woo-mcp signs its requests with this address. It calls WordPress over plain HTTP
     # inside the cluster, and WooCommerce checks the signature against the scheme it sees,
