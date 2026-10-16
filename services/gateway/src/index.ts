@@ -1,4 +1,4 @@
-import { renderMetrics } from "./metrics.js";
+import { recordHttpRequest, renderMetrics } from "./metrics.js";
 import Fastify from "fastify";
 import { config } from "./config.js";
 import { hashPassword } from "./crypto.js";
@@ -39,6 +39,10 @@ async function main(): Promise<void> {
   await bootstrap();
 
   const app = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024, trustProxy: true });
+  app.addHook("onResponse", async (req, reply) => {
+    if (req.routeOptions.url === "/metrics") return;
+    recordHttpRequest(req.method, req.routeOptions.url ?? "unmatched", reply.statusCode, reply.elapsedTime);
+  });
   app.get("/healthz", async () => "ok");
   // Metrics for in-cluster scraping. The ingress doesn't route this path.
   app.get("/metrics", async (_req, reply) => {

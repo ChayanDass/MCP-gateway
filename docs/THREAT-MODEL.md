@@ -48,7 +48,7 @@ This note covers what the gateway protects, who might attack it, the controls in
 
 ### 4. Store data and the store
 
-- The Helm policy templates isolate ingress to selected pods: MariaDB allows WordPress and the setup Job; WordPress allows ingress-nginx and woo-mcp; woo-mcp allows the gateway; PostgreSQL allows the gateway; and gateway/dashboard allow ingress-nginx. These rules are enforced only by a policy-capable CNI. The default Kind path from `scripts/init.sh` uses kindnet and does not enforce NetworkPolicy; local policy tests require the optional Calico setup. The templates do not restrict egress.
+- The Helm policy templates isolate ingress to selected pods: MariaDB allows WordPress and the setup Job; WordPress allows ingress-nginx and woo-mcp; woo-mcp allows the gateway; PostgreSQL allows the gateway; and gateway/dashboard allow ingress-nginx. PostgreSQL and MariaDB egress is limited to DNS; woo-mcp egress is limited to DNS and WordPress. Gateway egress remains open for configured external model, OAuth, and MCP providers. These rules are enforced only by a policy-capable CNI; default Kind kindnet does not enforce NetworkPolicy.
 - Dashboard requests reach the store only through the gateway.
 
 **Gap:** the WordPress admin password is one credential that controls the whole store. It is stored in a Secret; rotating it is a manual step.
@@ -61,7 +61,7 @@ This note covers what the gateway protects, who might attack it, the controls in
 - The last active member who can manage roles can't be disabled or deleted.
 - A member can't disable or change their own role.
 
-**Gap, delegated escalation:** a member with `members.manage` can assign any role to anyone, including Admin. A member with `roles.manage` can add any permission to any custom role they hold. The code doesn't check that the person making the change already holds the permissions they grant. The fix is to allow granting only permissions the actor holds, and to block assigning a role that has more permissions than the actor.
+Members with `members.manage` can only assign roles whose permissions are a subset of their own. Members with `roles.manage` can only create or edit roles containing permissions they themselves hold. The API enforces this on both role and member endpoints; dashboard controls are not the security boundary.
 
 ### 6. Audit log
 
@@ -139,6 +139,6 @@ An admin can change any setting, read the audit log and reset passwords. That's 
 4. Tool descriptions from untrusted servers are passed through unchecked.
 5. DNS rebinding is not blocked by the SSRF check.
 6. Shared server credentials give every member with access the same upstream reach.
-7. A member who can manage members or roles can grant permissions they don't hold.
+7. Gateway egress is open because provider and upstream destinations are configurable; a compromised gateway can make outbound connections permitted by the cluster network.
 8. The audit log can be edited by anyone with database access.
 9. The WordPress admin password controls the whole store.

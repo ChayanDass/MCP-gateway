@@ -18,6 +18,16 @@ replicas:
 # gateway replicas * databasePoolMax, plus administration and other clients.
 databasePoolMax: 10
 
+# Requires Prometheus Operator. The gateway metrics endpoint stays cluster-internal.
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    additionalLabels: {}
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
+
 storage:
   className: standard
   postgresSize: 2Gi

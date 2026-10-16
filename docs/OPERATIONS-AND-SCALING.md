@@ -1,6 +1,6 @@
 # Operations, capacity, and scaling
 
-The current deployment is a compact single-cluster stack intended for local development and small-team evaluation. Dev and prod values run two gateway replicas against the same PostgreSQL Service. The chart configures a gateway PodDisruptionBudget and best-effort spreading across node hostnames when more than one replica is requested. There is no HPA, database replication, or automated backup system. Increasing gateway replicas does not make the full system highly available.
+The current deployment is a compact single-cluster stack intended for local development and small-team evaluation. Dev and prod values run two gateway replicas against the same PostgreSQL Service. The chart configures a gateway PodDisruptionBudget and best-effort spreading across node hostnames when more than one replica is requested. There is no HPA, database replication, or scheduled/off-site backup service. Increasing gateway replicas does not make the full system highly available.
 
 ## Current capacity shape
 
@@ -63,15 +63,17 @@ The service handles requests without local durable application state, so multipl
 
 ### Stateful workloads
 
-PostgreSQL, MariaDB, and WordPress use persistent volumes and run as one replica. A `ReadWriteOnce` volume normally attaches to one node at a time; adding replicas can create scheduling or data-corruption problems. WordPress also uses a `Recreate` strategy because its files are shared through one volume. There is no automated backup/restore system in this repository.
+PostgreSQL, MariaDB, and WordPress use persistent volumes and run as one replica. A `ReadWriteOnce` volume normally attaches to one node at a time; adding replicas can create scheduling or data-corruption problems. WordPress also uses a `Recreate` strategy because its files are shared through one volume.
 
 Before operating a non-disposable environment:
 
 1. Choose storage with known durability, capacity, and restore behavior.
-2. Back up PostgreSQL, MariaDB, and WordPress uploads/files on a schedule appropriate to the data.
-3. Store backups outside the cluster and protect them with encryption and access controls.
-4. Test restoring into a separate namespace or cluster; a successful backup job alone does not prove recovery.
-5. Keep the gateway encryption key backed up separately and securely. Without it, encrypted upstream credentials in PostgreSQL cannot be decrypted.
+2. Run `scripts/backup.sh` from a trusted operator workstation with `kubectl` and `age` installed. Set `AGE_RECIPIENT` to an age public key. The script encrypts PostgreSQL, MariaDB, and WordPress file backups before writing them to `BACKUP_DIR` (default `./backups`).
+3. Copy the encrypted artifacts and checksum file to storage outside the cluster. The script does not schedule itself or upload off-site.
+4. Test decrypting and restoring all artifacts into an isolated namespace or cluster; a successful backup alone does not prove recovery.
+5. Keep the age private key and gateway encryption key backed up separately and securely. The gateway key is needed to decrypt stored upstream credentials.
+
+For a restore drill, decrypt each artifact with `age -d -i <private-key> <artifact.age>`. Restore `gateway.dump` with `pg_restore -U gateway -d gateway --clean --if-exists`, import `wordpress.sql` into the `wordpress` MariaDB database, and extract `wordpress-files.tar.gz` into `/var/www/html`. Take the target offline first and adapt database connection options to the target cluster. Confirm login, store pages, product/media access, and gateway integrations before declaring recovery successful.
 
 ## Autoscaling and a growth path
 
@@ -103,7 +105,7 @@ kubectl -n kube-mcp logs job/store-setup --tail=100
 helm -n kube-mcp status kube-mcp
 ```
 
-`kubectl top` needs Metrics Server; if it is not installed, use provider/host telemetry instead. The gateway `/metrics` endpoint is not exposed through ingress. Use an in-cluster scraper or a secured port-forward for manual inspection; do not expose it publicly without an authentication/network plan.
+`kubectl top` needs Metrics Server; if it is not installed, use provider/host telemetry instead. Gateway metrics counters are process-local, so a Prometheus deployment should scrape each gateway pod and aggregate the series. With Prometheus Operator installed, set `gateway.monitoring.serviceMonitor.enabled: true`; add labels under `gateway.monitoring.serviceMonitor.additionalLabels` if the Prometheus instance selects ServiceMonitors by label. Set `gateway.monitoring.prometheusRule.enabled: true` to install alerts for unavailable gateway replicas and sustained HTTP 5xx responses. These rules expect Prometheus Operator, kube-state-metrics, and the standard `namespace` target label. The gateway exports HTTP request counts and duration histograms, tool call outcomes and durations, rate-limit counts, and upstream health. The `/metrics` endpoint is not exposed through ingress. Add alerts for PostgreSQL saturation using database telemetry from your PostgreSQL monitoring stack. Do not expose metrics publicly without an authentication/network plan.
 
 ## Upgrade and recovery notes
 

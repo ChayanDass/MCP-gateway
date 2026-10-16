@@ -338,12 +338,15 @@ export function registerApi(app: FastifyInstance): void {
 
   // Create a member (or admin) with a name, role, password and per-server access.
   app.post<{ Body: { email?: string; name?: string; roleId?: string; password?: string; access?: Record<string, string> } }>("/api/users", async (req, reply) => {
-    if (!(await currentUser(req, reply, "members.manage"))) return;
+    const admin = await currentUser(req, reply, "members.manage");
+    if (!admin) return;
     const { email = "", name = "", roleId = "", password = "", access = {} } = req.body ?? {};
     if (!email.includes("@") || !name.trim()) return reply.code(400).send({ error: "Email and name are required" });
     if (password.length < 8) return reply.code(400).send({ error: "Password must be at least 8 characters" });
-    const { rows: roleRows } = await pool.query(`SELECT id FROM roles WHERE id = $1`, [roleId || null]).catch(() => ({ rows: [] as { id: string }[] }));
+    const { rows: roleRows } = await pool.query<{ id: string; permissions: string[] }>(`SELECT id, permissions FROM roles WHERE id = $1`, [roleId || null]).catch(() => ({ rows: [] as { id: string; permissions: string[] }[] }));
     if (!roleRows[0]) return reply.code(400).send({ error: "Choose a role for this member" });
+    const deniedRolePermission = roleRows[0].permissions.find((permission) => !admin.permissions.includes(permission));
+    if (deniedRolePermission) return reply.code(403).send({ error: `You cannot grant the ${deniedRolePermission} permission` });
     for (const level of Object.values(access)) {
       if (!["none", "read", "write"].includes(level)) return reply.code(400).send({ error: "Access must be none, read or write" });
     }
@@ -392,6 +395,8 @@ export function registerApi(app: FastifyInstance): void {
       const { rows: r } = await pool.query<{ permissions: string[] }>(`SELECT permissions FROM roles WHERE id = $1`, [roleId]).catch(() => ({ rows: [] as { permissions: string[] }[] }));
       if (!r[0]) return reply.code(400).send({ error: "That role doesn't exist" });
       nextPerms = r[0].permissions;
+      const deniedRolePermission = nextPerms.find((permission) => !admin.permissions.includes(permission));
+      if (deniedRolePermission) return reply.code(403).send({ error: `You cannot grant the ${deniedRolePermission} permission` });
     }
     const losesRoleManager = (cur[0].permissions.includes("roles.manage") && !nextPerms.includes("roles.manage")) || disabled === true;
     if (losesRoleManager && !(await otherActiveRoleManager(req.params.id))) {
@@ -669,11 +674,14 @@ export function registerApi(app: FastifyInstance): void {
   };
 
   app.post<{ Body: { name?: string; description?: string; permissions?: string[] } }>("/api/roles", async (req, reply) => {
-    if (!(await currentUser(req, reply, "roles.manage"))) return;
+    const admin = await currentUser(req, reply, "roles.manage");
+    if (!admin) return;
     const name = req.body?.name ?? "";
     const permissions = req.body?.permissions ?? [];
     const problem = roleProblem(name, permissions);
     if (problem) return reply.code(400).send({ error: problem });
+    const deniedPermission = permissions.find((permission) => !admin.permissions.includes(permission));
+    if (deniedPermission) return reply.code(403).send({ error: `You cannot grant the ${deniedPermission} permission` });
     try {
       const { rows } = await pool.query<{ id: string }>(
         `INSERT INTO roles (name, description, permissions) VALUES ($1, $2, $3) RETURNING id`,
@@ -687,7 +695,8 @@ export function registerApi(app: FastifyInstance): void {
   });
 
   app.patch<{ Params: { id: string }; Body: { name?: string; description?: string; permissions?: string[] } }>("/api/roles/:id", async (req, reply) => {
-    if (!(await currentUser(req, reply, "roles.manage"))) return;
+    const admin = await currentUser(req, reply, "roles.manage");
+    if (!admin) return;
     const { rows: cur } = await pool.query<{ name: string; builtin: boolean }>(`SELECT name, builtin FROM roles WHERE id = $1`, [req.params.id]);
     if (!cur[0]) return reply.code(404).send({ error: "Role not found" });
     if (cur[0].builtin && cur[0].name === "Admin") return reply.code(400).send({ error: "The Admin role always has every permission and can't be changed" });
@@ -695,6 +704,9 @@ export function registerApi(app: FastifyInstance): void {
     const permissions = req.body?.permissions;
     const problem = roleProblem(name, permissions ?? []);
     if (problem && (req.body?.name !== undefined || permissions !== undefined)) return reply.code(400).send({ error: problem });
+    const nextPermissions = permissions ?? (await pool.query<{ permissions: string[] }>(`SELECT permissions FROM roles WHERE id = $1`, [req.params.id])).rows[0]?.permissions ?? [];
+    const deniedPermission = nextPermissions.find((permission) => !admin.permissions.includes(permission));
+    if (deniedPermission) return reply.code(403).send({ error: `You cannot grant the ${deniedPermission} permission` });
     try {
       await pool.query(
         `UPDATE roles SET name = $2, description = COALESCE($3, description), permissions = COALESCE($4, permissions) WHERE id = $1`,

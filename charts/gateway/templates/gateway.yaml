@@ -4,6 +4,7 @@ metadata:
   name: gateway
   labels:
     {{- include "mcp.labels" . | nindent 4 }}
+    {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 4 }}
 spec:
   selector:
     {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 4 }}
@@ -11,6 +12,58 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gateway
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "mcp.selector" (dict "root" . "component" "gateway") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval | quote }}
+{{- end }}
+---
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gateway
+  labels:
+    {{- include "mcp.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kube-mcp.gateway
+      rules:
+        - alert: KubeMcpGatewayReplicasUnavailable
+          expr: kube_deployment_status_replicas_available{namespace={{ .Release.Namespace | quote }},deployment="gateway"} < kube_deployment_spec_replicas{namespace={{ .Release.Namespace | quote }},deployment="gateway"}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Gateway replicas are unavailable
+            description: One or more desired gateway replicas have been unavailable for five minutes.
+        - alert: KubeMcpGatewayHighHttp5xxRate
+          expr: (sum(rate(kmcp_http_requests_total{namespace={{ .Release.Namespace | quote }},status="5xx"}[5m])) / clamp_min(sum(rate(kmcp_http_requests_total{namespace={{ .Release.Namespace | quote }}}[5m])), 0.001) > 0.05) and (sum(rate(kmcp_http_requests_total{namespace={{ .Release.Namespace | quote }}}[5m])) > 0.1)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Gateway HTTP error rate is elevated
+            description: More than five percent of gateway HTTP responses are 5xx for ten minutes.
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

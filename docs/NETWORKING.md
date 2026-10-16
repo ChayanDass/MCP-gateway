@@ -68,9 +68,11 @@ The charts install these ingress rules in the release namespace:
 | WordPress | ingress-nginx controller pods and `woo-mcp`, TCP 80 |
 | MariaDB | WordPress and the store setup Job, TCP 3306 |
 
+PostgreSQL and MariaDB can egress only to cluster DNS. `woo-mcp` can egress to DNS and WordPress on TCP 80. Gateway egress remains open for configured model, OAuth, and MCP provider destinations; WordPress and the setup Job also retain outbound access for setup and updates.
+
 The policies select pods by labels, not Services. In the chart, the ingress controller is deployed into the same `kube-mcp` namespace and has the `app.kubernetes.io/name: ingress-nginx` label. When deploying components in different namespaces, review and adapt the namespace and pod selectors.
 
-These templates declare ingress isolation for selected targets. They do **not** define egress rules; egress from selected pods remains allowed. They also do not implement an explicit default-deny policy for every pod in the namespace. The policies limit the listed inbound paths; they are not a complete namespace firewall.
+These egress rules do not implement default-deny for every pod; they cover only the listed workloads.
 
 ### CNI enforcement matters
 

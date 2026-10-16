@@ -9,7 +9,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: mariadb
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector:
@@ -20,6 +20,17 @@ spec:
               app.kubernetes.io/name: setup
       ports:
         - port: 3306
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
 ---
 # WordPress is reached by the ingress controller and by the MCP chart's woo-mcp
 # (the REST API). Nothing else can reach it.

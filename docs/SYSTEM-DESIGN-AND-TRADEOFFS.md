@@ -49,6 +49,8 @@ Chat requests use the signed-in member identity. The gateway asks the configured
 
 The gateway enforces access on each request. Dashboard navigation and controls are hidden where possible, but UI hiding is not the security boundary. The permission registry is in `services/gateway/src/permissions.ts`; the decision logic is in `services/gateway/src/access.ts`.
 
+Role editors can grant only permissions they hold, and member managers can assign only roles whose permissions are a subset of their own. The API enforces this delegation boundary.
+
 MCP client authentication is separate from browser sign-in:
 
 - API keys are generated randomly, shown once, stored as SHA-256 hashes, and revocable.
@@ -81,7 +83,8 @@ Gateway schema initialization uses a PostgreSQL advisory lock to prevent concurr
 - Upstream OAuth state is persisted briefly in PostgreSQL; its PKCE verifier is encrypted and the state is consumed once. This lets the callback complete on any ready gateway replica.
 - Database connections are pooled per replica (`DATABASE_POOL_MAX`, default 10). Total possible gateway connections are approximately replica count × pool maximum, before other clients.
 - When a member's visible tool list exceeds `TOOL_DISCOVERY_THRESHOLD` (default 30), the gateway can expose `kmcp__search_tools` and `kmcp__call_tool` instead of the full list.
-- Gateway `/metrics` returns Prometheus text metrics on port 8080. It is deliberately not routed by the public Ingress; scrape it from inside the cluster or through an explicitly secured monitoring path.
+- Gateway `/metrics` returns Prometheus text metrics on port 8080. Counters are per process; scrape each replica and aggregate in the metrics backend. The endpoint is deliberately not routed by the public Ingress.
+- PostgreSQL and MariaDB egress is limited to DNS; `woo-mcp` egress is limited to DNS and WordPress. Gateway egress remains open for configurable external providers and upstreams. See [Networking](NETWORKING.md) and [Operations and scaling](OPERATIONS-AND-SCALING.md) for policy and backup operations.
 - Use Kubernetes events, pod logs, readiness, and the dashboard audit page together. The audit log explains tool outcomes; metrics aggregate service behavior.
 
 ## Deployment paths
