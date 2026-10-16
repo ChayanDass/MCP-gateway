@@ -89,19 +89,19 @@ jobs:
         with:
           ref: main
 
-      - name: Point the charts at this build
+      - name: Point production values at this build
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           SHA="${{ github.sha }}"
-          sed -i -E "s#(ghcr\.io/${OWNER}/kube-mcp/woo-mcp):[^[:space:]]+#\1:${SHA}#" charts/mcp/values.yaml
-          sed -i -E "s#(ghcr\.io/${OWNER}/kube-mcp/gateway):[^[:space:]]+#\1:${SHA}#" charts/gateway/values.yaml
-          sed -i -E "s#(ghcr\.io/${OWNER}/kube-mcp/dashboard):[^[:space:]]+#\1:${SHA}#" charts/gateway/values.yaml
+          sed -i -E "s#(wooMcp: ghcr\.io/${OWNER}/kube-mcp/woo-mcp):[^[:space:]]+#\1:${SHA}#" charts/stack/values-prod.yaml
+          sed -i -E "s#(gateway: ghcr\.io/${OWNER}/kube-mcp/gateway):[^[:space:]]+#\1:${SHA}#" charts/stack/values-prod.yaml
+          sed -i -E "s#(dashboard: ghcr\.io/${OWNER}/kube-mcp/dashboard):[^[:space:]]+#\1:${SHA}#" charts/stack/values-prod.yaml
 
       - name: Commit and push if the tags changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add charts/mcp/values.yaml charts/gateway/values.yaml
+          git add charts/stack/values-prod.yaml
           if git diff --cached --quiet; then
             echo "tags already current"
             exit 0

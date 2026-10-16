@@ -89,6 +89,12 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.2
+      - name: Build and load local application images
+        run: |
+          docker build --provenance=false --sbom=false -t woo-mcp:0.1.0 services/woo-mcp
+          docker build --provenance=false --sbom=false -t gateway:0.2.4 services/gateway
+          docker build --provenance=false --sbom=false -t dashboard:0.8.1 dashboard
+          kind load docker-image woo-mcp:0.1.0 gateway:0.2.4 dashboard:0.8.1 --name kube-mcp
       - name: Install the stack
         run: |
           helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx

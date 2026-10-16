@@ -31,7 +31,7 @@ kubectl wait --for=condition=Ready node --all --timeout=300s
 
 ## 3. Build and load the images
 
-The node can't pull the locally built images, so build them and load them into the node. The `docker save | cat` form is needed when Docker is installed as a snap, since snap Docker can't write to `/tmp`.
+The local chart values select `woo-mcp:0.1.0`, `gateway:0.2.4` and `dashboard:0.8.1`. Build those tags and import them into the Kind node. Piping the image stream directly into the node also works when Docker is installed as a snap:
 
 ```sh
 docker build --provenance=false --sbom=false -t woo-mcp:0.1.0 services/woo-mcp
@@ -39,13 +39,11 @@ docker build --provenance=false --sbom=false -t gateway:0.2.4 services/gateway
 docker build --provenance=false --sbom=false -t dashboard:0.8.1 dashboard
 
 for img in woo-mcp:0.1.0 gateway:0.2.4 dashboard:0.8.1; do
-  docker save --platform linux/amd64 $img | cat > /tmp/load.tar
-  cat /tmp/load.tar | docker exec -i kube-mcp-control-plane ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
+  docker save --platform linux/amd64 "$img" | docker exec -i kube-mcp-control-plane ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
 done
-rm -f /tmp/load.tar
 ```
 
-The tags must match the `image:` lines in the manifests. If you build a new version, change the tag in the manifest too. Reusing a tag keeps the old image on the node, because the pull policy is `IfNotPresent`.
+The tags are set in `charts/stack/values-dev.yaml`. `scripts/init.sh` builds and loads them automatically. Production selects the published GHCR tags in `charts/stack/values-prod.yaml`; the image workflow updates those tags after each successful build.
 
 The ingress controller image is pulled from `registry.k8s.io` by the node itself. If the node can't reach it, pull it on the host and load it the same way.
 
