@@ -68,6 +68,19 @@ kubectl -n kube-mcp get secret store-secrets \
 
 The local chart configures a public Google OAuth client ID for the `http://localhost` origin. Password sign-in works without Google configuration. See [Local setup](docs/SETUP.md) for cluster checks, image refresh, an optional Calico policy-enforced path, and troubleshooting.
 
+### Live AWS deployment
+
+The current AWS deployment is reachable at:
+
+| Service | URL |
+|---|---|
+| WooCommerce store | <https://store.13.200.126.173.nip.io> |
+| Dashboard and gateway | <https://kube-mcp.13.200.126.173.nip.io> |
+| Gateway health check | <https://kube-mcp.13.200.126.173.nip.io/healthz> |
+| MCP endpoint | <https://kube-mcp.13.200.126.173.nip.io/mcp> |
+
+The dashboard and MCP endpoint share a hostname. The dashboard requires sign-in, and MCP clients need an API key or OAuth authorization. These links depend on the AWS deployment remaining online; see [Setup and operations](docs/SETUP.md) for deployment details.
+
 ### Refresh a local image
 
 The dev image tags use `IfNotPresent`; after rebuilding an image with the same tag, import it and restart the matching deployment so Kubernetes starts a new pod:
