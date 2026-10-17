@@ -94,8 +94,11 @@ Customers can use the storefront and register through **My account**. The demo c
 
 The endpoint is `/mcp` on the dashboard host:
 
-- Local: `http://localhost/mcp`
-- Production: the HTTPS dashboard host configured in `charts/stack/values-prod.yaml`, followed by `/mcp`
+| Environment | MCP endpoint |
+|---|---|
+| Local | <http://localhost/mcp> |
+| AWS production | <https://kube-mcp.13.200.126.173.nip.io/mcp> |
+| Other production deployments | <https://your-dashboard-host/mcp> |
 
 Create an API key from **Clients** and configure the MCP client to send it as a Bearer token. Example:
 
